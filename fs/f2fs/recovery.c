@@ -553,8 +553,7 @@ out:
 	return err;
 }
 
-static int recover_data(struct f2fs_sb_info *sbi, struct list_head *inode_list,
-						struct list_head *dir_list)
+static int recover_data(struct f2fs_sb_info *sbi, struct list_head *head)
 {
 	struct curseg_info *curseg;
 	struct page *page = NULL;
@@ -665,7 +664,7 @@ int f2fs_recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only)
 	need_writecp = true;
 
 	/* step #2: recover data */
-	err = recover_data(sbi, &inode_list, &dir_list);
+	err = recover_data(sbi, &inode_list);
 	if (!err)
 		f2fs_bug_on(sbi, !list_empty(&inode_list));
 skip:
