@@ -687,6 +687,14 @@ int stm_register_device(struct device *parent, struct stm_data *stm_data,
 	stm->dev.parent = parent;
 	stm->dev.release = stm_device_release;
 
+	err = kobject_set_name(&stm->dev.kobj, "%s", stm_data->name);
+	if (err)
+		goto err_device;
+
+	err = device_add(&stm->dev);
+	if (err)
+		goto err_device;
+
 	mutex_init(&stm->link_mutex);
 	spin_lock_init(&stm->link_lock);
 	INIT_LIST_HEAD(&stm->link_list);
@@ -867,6 +875,9 @@ static int __stm_source_link_drop(struct stm_source_device *src,
 
 	lockdep_assert_held(&stm->link_mutex);
 
+	if (src->data->unlink)
+		src->data->unlink(src->data);
+
 	/* for stm::link_list modification, we hold both mutex and spinlock */
 	spin_lock(&stm->link_lock);
 	spin_lock(&src->link_lock);
@@ -891,21 +902,6 @@ static int __stm_source_link_drop(struct stm_source_device *src,
 unlock:
 	spin_unlock(&src->link_lock);
 	spin_unlock(&stm->link_lock);
-
-	/*
-	 * Call the unlink callbacks for both source and stm, when we know
-	 * that we have actually performed the unlinking.
-	 */
-	if (!ret) {
-		if (src->data->unlink)
-			src->data->unlink(src->data);
-
-		if (stm->data->unlink)
-			stm->data->unlink(stm->data, src->output.master,
-					  src->output.channel);
-	}
-
-	return ret;
 }
 
 /**
@@ -935,7 +931,7 @@ retry:
 	ret = 0;
 	if (stm) {
 		mutex_lock(&stm->link_mutex);
-		ret = __stm_source_link_drop(src, stm);
+		__stm_source_link_drop(src, stm);
 		mutex_unlock(&stm->link_mutex);
 	}
 
