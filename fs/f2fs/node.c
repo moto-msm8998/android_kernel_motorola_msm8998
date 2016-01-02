@@ -325,18 +325,16 @@ static void cache_nat_entry(struct f2fs_sb_info *sbi, nid_t nid,
 	if (!new)
 		return;
 
-	down_write(&nm_i->nat_tree_lock);
+static void cache_nat_entry(struct f2fs_nm_info *nm_i, nid_t nid,
+						struct f2fs_nat_entry *ne)
+{
+	struct nat_entry *e;
+
 	e = __lookup_nat_cache(nm_i, nid);
-	if (!e)
-		e = __init_nat_entry(nm_i, new, ne, false);
-	else
-		f2fs_bug_on(sbi, nat_get_ino(e) != le32_to_cpu(ne->ino) ||
-				nat_get_blkaddr(e) !=
-					le32_to_cpu(ne->block_addr) ||
-				nat_get_version(e) != ne->version);
-	up_write(&nm_i->nat_tree_lock);
-	if (e != new)
-		__free_nat_entry(new);
+	if (!e) {
+		e = grab_nat_entry(nm_i, nid);
+		node_info_from_raw_nat(&e->ni, ne);
+	}
 }
 
 static void set_node_addr(struct f2fs_sb_info *sbi, struct node_info *ni,
@@ -448,6 +446,8 @@ void f2fs_get_node_info(struct f2fs_sb_info *sbi, nid_t nid,
 
 	memset(&ne, 0, sizeof(struct f2fs_nat_entry));
 
+	down_write(&nm_i->nat_tree_lock);
+
 	/* Check current segment summary */
 	down_read(&curseg->journal_rwsem);
 	i = f2fs_lookup_journal_in_cursum(journal, NAT_JOURNAL, nid, 0);
@@ -472,7 +472,8 @@ void f2fs_get_node_info(struct f2fs_sb_info *sbi, nid_t nid,
 	f2fs_put_page(page, 1);
 cache:
 	/* cache nat entry */
-	cache_nat_entry(sbi, nid, &ne);
+	cache_nat_entry(NM_I(sbi), nid, &ne);
+	up_write(&nm_i->nat_tree_lock);
 }
 
 /*
@@ -1904,31 +1905,14 @@ static bool add_free_nid(struct f2fs_sb_info *sbi,
 	spin_lock(&nm_i->nid_list_lock);
 
 	if (build) {
-		/*
-		 *   Thread A             Thread B
-		 *  - f2fs_create
-		 *   - f2fs_new_inode
-		 *    - f2fs_alloc_nid
-		 *     - __insert_nid_to_list(PREALLOC_NID)
-		 *                     - f2fs_balance_fs_bg
-		 *                      - f2fs_build_free_nids
-		 *                       - __f2fs_build_free_nids
-		 *                        - scan_nat_page
-		 *                         - add_free_nid
-		 *                          - __lookup_nat_cache
-		 *  - f2fs_add_link
-		 *   - f2fs_init_inode_metadata
-		 *    - f2fs_new_inode_page
-		 *     - f2fs_new_node_page
-		 *      - set_node_addr
-		 *  - f2fs_alloc_nid_done
-		 *   - __remove_nid_from_list(PREALLOC_NID)
-		 *                         - __insert_nid_to_list(FREE_NID)
-		 */
+		/* do not add allocated nids */
 		ne = __lookup_nat_cache(nm_i, nid);
 		if (ne && (!get_nat_flag(ne, IS_CHECKPOINTED) ||
 				nat_get_blkaddr(ne) != NULL_ADDR))
-			goto err_out;
+			allocated = true;
+		if (allocated)
+			return 0;
+	}
 
 		e = __lookup_free_nid_list(nm_i, nid);
 		if (e) {
@@ -2105,7 +2089,17 @@ static void __f2fs_build_free_nids(struct f2fs_sb_info *sbi,
 	nm_i->next_scan_nid = nid;
 
 	/* find free nids from current sum_pages */
-	scan_curseg_cache(sbi);
+	mutex_lock(&curseg->curseg_mutex);
+	for (i = 0; i < nats_in_cursum(sum); i++) {
+		block_t addr = le32_to_cpu(nat_in_journal(sum, i).block_addr);
+		nid = le32_to_cpu(nid_in_journal(sum, i));
+		if (addr == NULL_ADDR)
+			add_free_nid(sbi, nid, true);
+		else
+			remove_free_nid(nm_i, nid);
+	}
+	mutex_unlock(&curseg->curseg_mutex);
+	up_read(&nm_i->nat_tree_lock);
 
 	up_read(&nm_i->nat_tree_lock);
 
@@ -2547,14 +2541,9 @@ static void __flush_nat_entry_set(struct f2fs_sb_info *sbi,
 		}
 		raw_nat_from_node_info(raw_ne, &ne->ni);
 		nat_reset_flag(ne);
-		__clear_nat_cache_dirty(NM_I(sbi), set, ne);
-		if (nat_get_blkaddr(ne) == NULL_ADDR) {
-			add_free_nid(sbi, nid, false, true);
-		} else {
-			spin_lock(&NM_I(sbi)->nid_list_lock);
-			update_free_nid_bitmap(sbi, nid, false, false);
-			spin_unlock(&NM_I(sbi)->nid_list_lock);
-		}
+		__clear_nat_cache_dirty(NM_I(sbi), ne);
+		if (nat_get_blkaddr(ne) == NULL_ADDR)
+			add_free_nid(sbi, nid, false);
 	}
 
 	if (to_journal) {
@@ -2564,11 +2553,10 @@ static void __flush_nat_entry_set(struct f2fs_sb_info *sbi,
 		f2fs_put_page(page, 1);
 	}
 
-	/* Allow dirty nats by node block allocation in write_begin */
-	if (!set->entry_cnt) {
-		radix_tree_delete(&NM_I(sbi)->nat_set_root, set->set);
-		kmem_cache_free(nat_entry_set_slab, set);
-	}
+	f2fs_bug_on(sbi, set->entry_cnt);
+
+	radix_tree_delete(&NM_I(sbi)->nat_set_root, set->set);
+	kmem_cache_free(nat_entry_set_slab, set);
 }
 
 /*
@@ -2613,7 +2601,8 @@ void f2fs_flush_nat_entries(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 		__flush_nat_entry_set(sbi, set, cpc);
 
 	up_write(&nm_i->nat_tree_lock);
-	/* Allow dirty nats by node block allocation in write_begin */
+
+	f2fs_bug_on(sbi, nm_i->dirty_nat_cnt);
 }
 
 static int __get_nat_bitmaps(struct f2fs_sb_info *sbi)
