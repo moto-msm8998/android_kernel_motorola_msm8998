@@ -869,15 +869,20 @@ static int __stm_source_link_drop(struct stm_source_device *src,
 
 	lockdep_assert_held(&stm->link_mutex);
 
-	if (src->data->unlink)
-		src->data->unlink(src->data);
-
 	/* for stm::link_list modification, we hold both mutex and spinlock */
 	spin_lock(&stm->link_lock);
 	spin_lock(&src->link_lock);
 	link = srcu_dereference_check(src->link, &stm_source_srcu, 1);
-	if (WARN_ON_ONCE(link != stm))
+
+	/*
+	 * The linked device may have changed since we last looked, because
+	 * we weren't holding the src::link_lock back then; if this is the
+	 * case, tell the caller to retry.
+	 */
+	if (link != stm) {
+		ret = -EAGAIN;
 		goto unlock;
+	}
 
 	stm_output_free(link, &src->output);
 	list_del_init(&src->link_entry);
@@ -888,6 +893,11 @@ static int __stm_source_link_drop(struct stm_source_device *src,
 unlock:
 	spin_unlock(&src->link_lock);
 	spin_unlock(&stm->link_lock);
+
+	if (!ret && src->data->unlink)
+		src->data->unlink(src->data);
+
+	return ret;
 }
 
 /**
@@ -917,7 +927,7 @@ retry:
 	ret = 0;
 	if (stm) {
 		mutex_lock(&stm->link_mutex);
-		__stm_source_link_drop(src, stm);
+		ret = __stm_source_link_drop(src, stm);
 		mutex_unlock(&stm->link_mutex);
 	}
 
