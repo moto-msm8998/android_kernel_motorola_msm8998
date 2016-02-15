@@ -397,17 +397,13 @@ static int stm_char_release(struct inode *inode, struct file *file)
 	struct stm_file *stmf = file->private_data;
 	struct stm_device *stm = stmf->stm;
 
-	if (stm->data->unlink)
-		stm->data->unlink(stm->data, stmf->output.master,
-				  stmf->output.channel);
-
-	stm_output_free(stm, &stmf->output);
+	stm_output_free(stmf->stm, &stmf->output);
 
 	/*
 	 * matches the stm_char_open()'s
 	 * class_find_device() + try_module_get()
 	 */
-	stm_put_device(stm);
+	stm_put_device(stmf->stm);
 	kfree(stmf);
 
 	return 0;
@@ -718,8 +714,6 @@ int stm_register_device(struct device *parent, struct stm_data *stm_data,
 	return 0;
 
 err_device:
-	unregister_chrdev(stm->major, stm_data->name);
-
 	/* matches device_initialize() above */
 	put_device(&stm->dev);
 err_free:
