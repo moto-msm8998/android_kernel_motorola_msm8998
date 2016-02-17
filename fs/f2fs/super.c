@@ -2279,7 +2279,7 @@ static int sanity_check_raw_super(struct f2fs_sb_info *sbi,
 	return 0;
 }
 
-int f2fs_sanity_check_ckpt(struct f2fs_sb_info *sbi)
+int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 {
 	unsigned int total, fsmeta;
 	struct f2fs_super_block *raw_super = F2FS_RAW_SUPER(sbi);
@@ -2866,13 +2866,6 @@ try_onemore:
 		goto free_meta_inode;
 	}
 
-	/* Initialize device list */
-	err = f2fs_scan_devices(sbi);
-	if (err) {
-		f2fs_msg(sb, KERN_ERR, "Failed to find devices");
-		goto free_devices;
-	}
-
 	sbi->total_valid_node_count =
 				le32_to_cpu(sbi->ckpt->valid_node_count);
 	percpu_counter_set(&sbi->total_valid_inode_count,
@@ -3073,9 +3066,7 @@ free_node_inode:
 free_nm:
 	f2fs_destroy_node_manager(sbi);
 free_sm:
-	f2fs_destroy_segment_manager(sbi);
-free_devices:
-	destroy_device_list(sbi);
+	destroy_segment_manager(sbi);
 	kfree(sbi->ckpt);
 free_meta_inode:
 	make_bad_inode(sbi->meta_inode);
