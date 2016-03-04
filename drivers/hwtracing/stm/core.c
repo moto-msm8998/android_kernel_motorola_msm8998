@@ -683,14 +683,6 @@ int stm_register_device(struct device *parent, struct stm_data *stm_data,
 	stm->dev.parent = parent;
 	stm->dev.release = stm_device_release;
 
-	err = kobject_set_name(&stm->dev.kobj, "%s", stm_data->name);
-	if (err)
-		goto err_device;
-
-	err = device_add(&stm->dev);
-	if (err)
-		goto err_device;
-
 	mutex_init(&stm->link_mutex);
 	spin_lock_init(&stm->link_lock);
 	INIT_LIST_HEAD(&stm->link_list);
