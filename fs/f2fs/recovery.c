@@ -614,13 +614,12 @@ next:
 	return err;
 }
 
-int f2fs_recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only)
+int recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only)
 {
 	struct list_head inode_list;
 	struct list_head dir_list;
 	int err;
 	int ret = 0;
-	unsigned long s_flags = sbi->sb->s_flags;
 	bool need_writecp = false;
 #ifdef CONFIG_QUOTA
 	int quota_enabled;
@@ -652,13 +651,13 @@ int f2fs_recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only)
 	mutex_lock(&sbi->cp_mutex);
 
 	/* step #1: find fsynced inode numbers */
-	err = find_fsync_dnodes(sbi, &inode_list, check_only);
+	err = find_fsync_dnodes(sbi, &inode_list);
 	if (err || list_empty(&inode_list))
-		goto skip;
+		goto out;
 
 	if (check_only) {
 		ret = 1;
-		goto skip;
+		goto out;
 	}
 
 	need_writecp = true;
@@ -691,15 +690,5 @@ skip:
 		};
 		err = f2fs_write_checkpoint(sbi, &cpc);
 	}
-
-	kmem_cache_destroy(fsync_entry_slab);
-out:
-#ifdef CONFIG_QUOTA
-	/* Turn quotas off */
-	if (quota_enabled)
-		f2fs_quota_off_umount(sbi->sb);
-#endif
-	sbi->sb->s_flags = s_flags; /* Restore MS_RDONLY status */
-
 	return ret ? ret: err;
 }

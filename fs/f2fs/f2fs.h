@@ -3057,8 +3057,8 @@ void f2fs_build_gc_manager(struct f2fs_sb_info *sbi);
 /*
  * recovery.c
  */
-int f2fs_recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only);
-bool f2fs_space_for_roll_forward(struct f2fs_sb_info *sbi);
+int recover_fsync_data(struct f2fs_sb_info *, bool);
+bool space_for_roll_forward(struct f2fs_sb_info *);
 
 /*
  * debug.c
