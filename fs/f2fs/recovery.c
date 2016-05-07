@@ -90,7 +90,8 @@ static void del_fsync_inode(struct fsync_inode_entry *entry)
 	kmem_cache_free(fsync_entry_slab, entry);
 }
 
-static int recover_dentry(struct inode *inode, struct page *ipage)
+static int recover_dentry(struct inode *inode, struct page *ipage,
+						struct list_head *dir_list)
 {
 	struct inode *inode;
 	struct fsync_inode_entry *entry;
@@ -142,16 +143,24 @@ static int recover_dentry(struct inode *inode, struct page *ipage,
 
 	entry = get_fsync_inode(dir_list, pino);
 	if (!entry) {
-		entry = add_fsync_inode(F2FS_I_SB(inode), dir_list,
-							pino, false);
-		if (IS_ERR(entry)) {
-			dir = ERR_CAST(entry);
-			err = PTR_ERR(entry);
+		dir = f2fs_iget(inode->i_sb, pino);
+		if (IS_ERR(dir)) {
+			err = PTR_ERR(dir);
+			goto out;
+		}
+
+		entry = add_fsync_inode(dir_list, dir);
+		if (!entry) {
+			err = -ENOMEM;
+			iput(dir);
 			goto out;
 		}
 	}
 
 	dir = entry->inode;
+
+	if (file_enc_name(inode))
+		return 0;
 
 	memset(&fname, 0, sizeof(struct fscrypt_name));
 	fname.disk_name.len = le32_to_cpu(raw_inode->i_namelen);
@@ -191,14 +200,9 @@ retry:
 		f2fs_delete_entry(de, page, dir, einode);
 		iput(einode);
 		goto retry;
-	} else if (IS_ERR(page)) {
-		err = PTR_ERR(page);
-	} else {
-		err = f2fs_add_dentry(dir, &fname, inode,
-					inode->i_ino, inode->i_mode);
 	}
-	if (err == -ENOMEM)
-		goto retry;
+	err = __f2fs_add_link(dir, &name, inode, inode->i_ino, inode->i_mode);
+
 	goto out;
 
 out_put:
@@ -582,7 +586,8 @@ out:
 	return err;
 }
 
-static int recover_data(struct f2fs_sb_info *sbi, struct list_head *head)
+static int recover_data(struct f2fs_sb_info *sbi, struct list_head *inode_list,
+						struct list_head *dir_list)
 {
 	struct curseg_info *curseg;
 	struct page *page = NULL;
@@ -647,6 +652,7 @@ int recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only)
 {
 	struct list_head inode_list;
 	struct list_head dir_list;
+	block_t blkaddr;
 	int err;
 	int ret = 0;
 	bool need_writecp = false;
@@ -692,7 +698,7 @@ int recover_fsync_data(struct f2fs_sb_info *sbi, bool check_only)
 	need_writecp = true;
 
 	/* step #2: recover data */
-	err = recover_data(sbi, &inode_list);
+	err = recover_data(sbi, &inode_list, &dir_list);
 	if (!err)
 		f2fs_bug_on(sbi, !list_empty(&inode_list));
 skip:
@@ -719,5 +725,8 @@ skip:
 		};
 		err = f2fs_write_checkpoint(sbi, &cpc);
 	}
+
+	destroy_fsync_dnodes(&dir_list);
+	kmem_cache_destroy(fsync_entry_slab);
 	return ret ? ret: err;
 }
