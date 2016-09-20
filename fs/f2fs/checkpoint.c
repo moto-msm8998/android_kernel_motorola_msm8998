@@ -1137,81 +1137,6 @@ static void update_ckpt_flags(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 {
 	unsigned long orphan_num = sbi->im[ORPHAN_INO].ino_num;
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
-	unsigned long flags;
-
-	spin_lock_irqsave(&sbi->cp_lock, flags);
-
-	if ((cpc->reason & CP_UMOUNT) &&
-			le32_to_cpu(ckpt->cp_pack_total_block_count) >
-			sbi->blocks_per_seg - NM_I(sbi)->nat_bits_blocks)
-		disable_nat_bits(sbi, false);
-
-	if (cpc->reason & CP_TRIMMED)
-		__set_ckpt_flags(ckpt, CP_TRIMMED_FLAG);
-	else
-		__clear_ckpt_flags(ckpt, CP_TRIMMED_FLAG);
-
-	if (cpc->reason & CP_UMOUNT)
-		__set_ckpt_flags(ckpt, CP_UMOUNT_FLAG);
-	else
-		__clear_ckpt_flags(ckpt, CP_UMOUNT_FLAG);
-
-	if (cpc->reason & CP_FASTBOOT)
-		__set_ckpt_flags(ckpt, CP_FASTBOOT_FLAG);
-	else
-		__clear_ckpt_flags(ckpt, CP_FASTBOOT_FLAG);
-
-	if (orphan_num)
-		__set_ckpt_flags(ckpt, CP_ORPHAN_PRESENT_FLAG);
-	else
-		__clear_ckpt_flags(ckpt, CP_ORPHAN_PRESENT_FLAG);
-
-	if (is_sbi_flag_set(sbi, SBI_NEED_FSCK))
-		__set_ckpt_flags(ckpt, CP_FSCK_FLAG);
-
-	/* set this flag to activate crc|cp_ver for recovery */
-	__set_ckpt_flags(ckpt, CP_CRC_RECOVERY_FLAG);
-	__clear_ckpt_flags(ckpt, CP_NOCRC_RECOVERY_FLAG);
-
-	spin_unlock_irqrestore(&sbi->cp_lock, flags);
-}
-
-static void commit_checkpoint(struct f2fs_sb_info *sbi,
-	void *src, block_t blk_addr)
-{
-	struct writeback_control wbc = {
-		.for_reclaim = 0,
-	};
-
-	/*
-	 * pagevec_lookup_tag and lock_page again will take
-	 * some extra time. Therefore, f2fs_update_meta_pages and
-	 * f2fs_sync_meta_pages are combined in this function.
-	 */
-	struct page *page = f2fs_grab_meta_page(sbi, blk_addr);
-	int err;
-
-	memcpy(page_address(page), src, PAGE_SIZE);
-	set_page_dirty(page);
-
-	f2fs_wait_on_page_writeback(page, META, true);
-	f2fs_bug_on(sbi, PageWriteback(page));
-	if (unlikely(!clear_page_dirty_for_io(page)))
-		f2fs_bug_on(sbi, 1);
-
-	/* writeout cp pack 2 page */
-	err = __f2fs_write_meta_page(page, &wbc, FS_CP_META_IO);
-	f2fs_bug_on(sbi, err);
-
-	f2fs_put_page(page, 0);
-
-	/* submit checkpoint (with barrier if NOBARRIER is not set) */
-	f2fs_submit_merged_write(sbi, META_FLUSH);
-}
-
-static int do_checkpoint(struct f2fs_sb_info *sbi, struct cp_control *cpc)
-{
-	struct f2fs_checkpoint *ckpt = F2FS_CKPT(sbi);
 	struct f2fs_nm_info *nm_i = NM_I(sbi);
 	unsigned long orphan_num = sbi->im[ORPHAN_INO].ino_num, flags;
 	block_t start_blk;
@@ -1219,10 +1144,6 @@ static int do_checkpoint(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 	__u32 crc32 = 0;
 	int i;
 	int cp_payload_blks = __cp_payload(sbi);
-	struct super_block *sb = sbi->sb;
-	struct curseg_info *seg_i = CURSEG_I(sbi, CURSEG_HOT_NODE);
-	u64 kbytes_written;
-	int err;
 
 	/* Flush all the NAT/SIT pages */
 	while (get_pages(sbi, F2FS_DIRTY_META)) {
@@ -1278,6 +1199,22 @@ static int do_checkpoint(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 
 	/* update ckpt flag for checkpoint */
 	update_ckpt_flags(sbi, cpc);
+
+	if (cpc->reason == CP_FASTBOOT)
+		set_ckpt_flags(ckpt, CP_FASTBOOT_FLAG);
+	else
+		clear_ckpt_flags(ckpt, CP_FASTBOOT_FLAG);
+
+	if (orphan_num)
+		set_ckpt_flags(ckpt, CP_ORPHAN_PRESENT_FLAG);
+	else
+		clear_ckpt_flags(ckpt, CP_ORPHAN_PRESENT_FLAG);
+
+	if (is_sbi_flag_set(sbi, SBI_NEED_FSCK))
+		set_ckpt_flags(ckpt, CP_FSCK_FLAG);
+
+	/* set this flag to activate crc|cp_ver for recovery */
+	set_ckpt_flags(ckpt, CP_CRC_RECOVERY_FLAG);
 
 	/* update SIT/NAT bitmap */
 	get_sit_bitmap(sbi, __bitmap_ptr(sbi, SIT_BITMAP));
@@ -1366,19 +1303,7 @@ static int do_checkpoint(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 	if (unlikely(f2fs_cp_error(sbi)))
 		return -EIO;
 
-	clear_sbi_flag(sbi, SBI_IS_DIRTY);
-	clear_sbi_flag(sbi, SBI_NEED_CP);
-	__set_cp_next_pack(sbi);
-
-	/*
-	 * redirty superblock if metadata like node page or inode cache is
-	 * updated during writing checkpoint.
-	 */
-	if (get_pages(sbi, F2FS_DIRTY_NODES) ||
-			get_pages(sbi, F2FS_DIRTY_IMETA))
-		set_sbi_flag(sbi, SBI_IS_DIRTY);
-
-	f2fs_bug_on(sbi, get_pages(sbi, F2FS_DIRTY_DENTS));
+	release_dirty_inode(sbi);
 
 	return 0;
 }
