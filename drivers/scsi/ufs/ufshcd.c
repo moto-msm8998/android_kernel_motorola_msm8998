@@ -9859,17 +9859,11 @@ static int ufshcd_devfreq_target(struct device *dev,
 {
 	int ret = 0;
 	struct ufs_hba *hba = dev_get_drvdata(dev);
+	bool release_clk_hold = false;
 	unsigned long irq_flags;
-	ktime_t start;
-	bool scale_up, sched_clk_scaling_suspend_work = false;
 
 	if (!ufshcd_is_clkscaling_supported(hba))
 		return -EINVAL;
-
-	if ((*freq > 0) && (*freq < UINT_MAX)) {
-		dev_err(hba->dev, "%s: invalid freq = %lu\n", __func__, *freq);
-		return -EINVAL;
-	}
 
 	spin_lock_irqsave(hba->host->host_lock, irq_flags);
 	if (ufshcd_eh_in_progress(hba)) {
@@ -9877,29 +9871,36 @@ static int ufshcd_devfreq_target(struct device *dev,
 		return 0;
 	}
 
-	if (!hba->clk_scaling.active_reqs)
-		sched_clk_scaling_suspend_work = true;
-
-	scale_up = (*freq == UINT_MAX) ? true : false;
-	if (!ufshcd_is_devfreq_scaling_required(hba, scale_up)) {
-		spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
-		ret = 0;
-		goto out; /* no state change required */
+	if (ufshcd_is_clkgating_allowed(hba) &&
+	    (hba->clk_gating.state != CLKS_ON)) {
+		if (cancel_delayed_work(&hba->clk_gating.gate_work)) {
+			/* hold the vote until the scaling work is completed */
+			hba->clk_gating.active_reqs++;
+			release_clk_hold = true;
+			hba->clk_gating.state = CLKS_ON;
+		} else {
+			/*
+			 * Clock gating work seems to be running in parallel
+			 * hence skip scaling work to avoid deadlock between
+			 * current scaling work and gating work.
+			 */
+			spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
+			return 0;
+		}
 	}
 	spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
 
-	start = ktime_get();
-	ret = ufshcd_devfreq_scale(hba, scale_up);
-	trace_ufshcd_profile_clk_scaling(dev_name(hba->dev),
-		(scale_up ? "up" : "down"),
-		ktime_to_us(ktime_sub(ktime_get(), start)), ret);
+	if (*freq == UINT_MAX)
+		err = ufshcd_scale_clks(hba, true);
+	else if (*freq == 0)
+		err = ufshcd_scale_clks(hba, false);
 
-out:
-	if (sched_clk_scaling_suspend_work)
-		queue_work(hba->clk_scaling.workq,
-			   &hba->clk_scaling.suspend_work);
+	spin_lock_irqsave(hba->host->host_lock, irq_flags);
+	if (release_clk_hold)
+		__ufshcd_release(hba);
+	spin_unlock_irqrestore(hba->host->host_lock, irq_flags);
 
-	return ret;
+	return err;
 }
 
 static int ufshcd_devfreq_get_dev_status(struct device *dev,
