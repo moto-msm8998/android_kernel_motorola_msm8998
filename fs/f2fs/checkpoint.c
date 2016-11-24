@@ -844,6 +844,11 @@ int f2fs_get_valid_checkpoint(struct f2fs_sb_info *sbi)
 	if (sanity_check_ckpt(sbi))
 		goto fail_no_cp;
 
+	if (cur_page == cp1)
+		sbi->cur_cp_pack = 1;
+	else
+		sbi->cur_cp_pack = 2;
+
 	if (cp_blks <= 1)
 		goto done;
 
@@ -1306,7 +1311,12 @@ static void update_ckpt_flags(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 
 	release_dirty_inode(sbi);
 
-	return 0;
+	if (unlikely(f2fs_cp_error(sbi)))
+		return;
+
+	clear_prefree_segments(sbi, cpc);
+	clear_sbi_flag(sbi, SBI_IS_DIRTY);
+	__set_cp_next_pack(sbi);
 }
 
 /*
