@@ -284,22 +284,14 @@ static unsigned int die_nest_count;
 
 static unsigned long oops_begin(void)
 {
-	int cpu;
+	struct thread_info *thread = current_thread_info();
+	int ret;
 	unsigned long flags;
+
+	raw_spin_lock_irqsave(&die_lock, flags);
 
 	oops_enter();
 
-	/* racy, but better than risking deadlock. */
-	raw_local_irq_save(flags);
-	cpu = smp_processor_id();
-	if (!arch_spin_trylock(&die_lock)) {
-		if (cpu == die_owner)
-			/* nested oops. should stop eventually */;
-		else
-			arch_spin_lock(&die_lock);
-	}
-	die_nest_count++;
-	die_owner = cpu;
 	console_verbose();
 	bust_spinlocks(1);
 	return flags;
@@ -313,18 +305,16 @@ static void oops_end(unsigned long flags, struct pt_regs *regs, int notify)
 	bust_spinlocks(0);
 	die_owner = -1;
 	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
-	die_nest_count--;
-	if (!die_nest_count)
-		/* Nest count reaches zero, release the lock. */
-		arch_spin_unlock(&die_lock);
-	raw_local_irq_restore(flags);
 	oops_exit();
 
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 	if (panic_on_oops)
 		panic("Fatal exception");
-	if (notify != NOTIFY_STOP)
+
+	raw_spin_unlock_irqrestore(&die_lock, flags);
+
+	if (ret != NOTIFY_STOP)
 		do_exit(SIGSEGV);
 }
 
