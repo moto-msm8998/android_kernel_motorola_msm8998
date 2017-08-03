@@ -177,3 +177,6 @@ obj-$(CONFIG_IP_SET) += ipset/
 
 # IPVS
 obj-$(CONFIG_IP_VS) += ipvs/
+
+# IKZUIPRC-5 tlv yangwj12
+obj-$(CONFIG_NETFILTER_XT_MATCH_TLV) += xt_tlv.o

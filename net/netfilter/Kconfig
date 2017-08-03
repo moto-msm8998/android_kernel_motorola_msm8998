@@ -1509,6 +1509,12 @@ config NETFILTER_XT_MATCH_U32
 
 	  Details and examples are in the kernel module source.
 
+config NETFILTER_XT_MATCH_TLV
+	tristate '"tlv" match support'
+	default n
+	---help---
+	  This option enables for reporting a netlink msg when data matched.
+
 endif # NETFILTER_XTABLES
 
 endmenu
