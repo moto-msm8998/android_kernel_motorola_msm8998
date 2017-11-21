@@ -671,6 +671,9 @@ static void _sde_hdmi_bridge_disable(struct drm_bridge *bridge)
 	if (sde_hdmi_tx_is_hdcp_enabled(display))
 		sde_hdmi_hdcp_off(display);
 
+	if (sde_hdmi_tx_is_hdcp_enabled(display))
+		sde_hdmi_hdcp_off(display);
+
 	sde_hdmi_clear_hdr_info(bridge);
 	/* Clear HDMI VSDB blocks info */
 	sde_hdmi_clear_vsdbs(bridge);
