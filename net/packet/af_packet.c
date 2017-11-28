@@ -1665,7 +1665,6 @@ static int fanout_add(struct sock *sk, u16 id, u16 type_flags)
 		atomic_long_set(&rollover->num, 0);
 		atomic_long_set(&rollover->num_huge, 0);
 		atomic_long_set(&rollover->num_failed, 0);
-		po->rollover = rollover;
 	}
 
 	match = NULL;
@@ -1710,6 +1709,8 @@ static int fanout_add(struct sock *sk, u16 id, u16 type_flags)
 		if (atomic_read(&match->sk_ref) < PACKET_FANOUT_MAX) {
 			__dev_remove_pack(&po->prot_hook);
 			po->fanout = match;
+			po->rollover = rollover;
+			rollover = NULL;
 			atomic_inc(&match->sk_ref);
 			__fanout_link(sk, po);
 			err = 0;
@@ -1723,10 +1724,7 @@ static int fanout_add(struct sock *sk, u16 id, u16 type_flags)
 	}
 
 out:
-	if (err && rollover) {
-		kfree(rollover);
-		po->rollover = NULL;
-	}
+	kfree(rollover);
 	mutex_unlock(&fanout_mutex);
 	return err;
 }
@@ -1750,9 +1748,6 @@ static struct packet_fanout *fanout_release(struct sock *sk)
 			list_del(&f->list);
 		else
 			f = NULL;
-
-		if (po->rollover)
-			kfree_rcu(po->rollover, rcu);
 	}
 	mutex_unlock(&fanout_mutex);
 
@@ -2910,6 +2905,7 @@ static int packet_release(struct socket *sock)
 	synchronize_net();
 
 	if (f) {
+		kfree(po->rollover);
 		fanout_release_data(f);
 		kfree(f);
 	}
