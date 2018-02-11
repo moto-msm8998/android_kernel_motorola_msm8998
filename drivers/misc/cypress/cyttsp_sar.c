@@ -42,7 +42,6 @@
 #else
 #define LOG_INFO(fmt, args...)
 #endif
-
 struct cycapsense_ctrl_data *ctrl_data;
 static int programming_done;
 static int fw_dl_status;
@@ -64,7 +63,6 @@ static int cyttsp_i2c_read_block(struct device *dev, u8 addr,
 	}
 
 	ret = i2c_master_recv(client, data, len);
-
 	return (ret < 0) ? ret : ret != len ? -EIO : 0;
 }
 
