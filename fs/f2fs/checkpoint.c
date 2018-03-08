@@ -166,7 +166,6 @@ int f2fs_ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages,
 		.op_flags = sync ? (REQ_SYNC | REQ_META | REQ_PRIO) :
 						REQ_RAHEAD,
 		.encrypted_page = NULL,
-		.in_list = false,
 		.is_meta = (type != META_POR),
 	};
 	struct blk_plug plug;
