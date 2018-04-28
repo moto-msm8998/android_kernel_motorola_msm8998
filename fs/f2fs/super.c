@@ -2138,9 +2138,6 @@ static int sanity_check_raw_super(struct f2fs_sb_info *sbi,
 {
 	block_t segment_count, segs_per_sec, secs_per_zone;
 	block_t total_sections, blocks_per_seg;
-	struct f2fs_super_block *raw_super = (struct f2fs_super_block *)
-					(bh->b_data + F2FS_SUPER_OFFSET);
-	struct super_block *sb = sbi->sb;
 	unsigned int blocksize;
 
 	if (F2FS_SUPER_MAGIC != le32_to_cpu(raw_super->magic)) {
@@ -2239,14 +2236,10 @@ static int sanity_check_raw_super(struct f2fs_sb_info *sbi,
 			secs_per_zone, total_sections);
 		return 1;
 	}
-	if (le32_to_cpu(raw_super->extension_count) > F2FS_MAX_EXTENSION ||
-			raw_super->hot_ext_count > F2FS_MAX_EXTENSION ||
-			(le32_to_cpu(raw_super->extension_count) +
-			raw_super->hot_ext_count) > F2FS_MAX_EXTENSION) {
+	if (le32_to_cpu(raw_super->extension_count) > F2FS_MAX_EXTENSION) {
 		f2fs_msg(sb, KERN_INFO,
-			"Corrupted extension count (%u + %u > %u)",
+			"Corrupted extension count (%u > %u)",
 			le32_to_cpu(raw_super->extension_count),
-			raw_super->hot_ext_count,
 			F2FS_MAX_EXTENSION);
 		return 1;
 	}
