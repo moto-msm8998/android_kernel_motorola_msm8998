@@ -145,6 +145,7 @@ enum try_sink_exit_mode {
 	ATTACHED_SRC = 0,
 	ATTACHED_SINK,
 	UNATTACHED_SINK,
+	ERR_VBUS_TIMEOUT,
 };
 
 struct smb_irq_info {
@@ -291,6 +292,11 @@ enum turbo_ebsrc {
 	TURBO_EBSRC_VALID,
 };
 
+enum usb_en_pol {
+	USB_EN_ACTIVE_HIGH = 0,
+	USB_EN_ACTIVE_LOW,
+};
+
 struct mmi_params {
 	bool			factory_mode;
 	int			demo_mode;
@@ -363,7 +369,12 @@ struct mmi_params {
 	int			typec_debounce_cnt;
 	int			typec_debounce_pre_cnt;
 	int			typec_delay_cnt;
-
+	const char		*inner_wls_name;
+	bool			inner_wls_used;
+	int			inner_wls_vmax;
+	int			inner_wls_imax;
+	struct gpio		wls_otg_gpio;
+	struct pinctrl		*wls_otg_pinctrl;
 };
 
 struct smb_charger {
@@ -375,6 +386,7 @@ struct smb_charger {
 	struct smb_iio		iio;
 	int			*debug_mask;
 	int			*try_sink_enabled;
+	int			*audio_headset_drp_wait_ms;
 	enum smb_mode		mode;
 	struct smb_chg_freq	chg_freq;
 	int			smb_version;
@@ -484,6 +496,7 @@ struct smb_charger {
 	u8			float_cfg;
 	bool			use_extcon;
 	bool			otg_present;
+	bool			is_audio_adapter;
 
 	/* workaround flag */
 	u32			wa_flags;
@@ -519,6 +532,9 @@ struct smb_charger {
 	bool			suspended;
 	int			aicl_threshold_mv;
 	int			hc_aicl_threshold_mv;
+
+	bool			single_path_usbin_switch;
+	u32			source_current_ma;
 };
 
 int smblib_read(struct smb_charger *chg, u16 addr, u8 *val);
@@ -534,6 +550,8 @@ int smblib_set_charge_param(struct smb_charger *chg,
 			    struct smb_chg_param *param, int val_u);
 int smblib_set_usb_suspend(struct smb_charger *chg, bool suspend);
 int smblib_set_dc_suspend(struct smb_charger *chg, bool suspend);
+
+int smblib_inner_wls_power_change(struct smb_charger *chg);
 
 int smblib_mapping_soc_from_field_value(struct smb_chg_param *param,
 					     int val_u, u8 *val_raw);
@@ -724,5 +742,7 @@ extern int eb_on_sw;
 
 #define AICL_THRESHOLD_MAX_MV 4700
 #define AICL_THRESHOLD_MIN_MV 4000
+
+#define DEFAULT_SOURCE_CURRENT_MA 1500
 
 #endif /* __SMB2_CHARGER_H */

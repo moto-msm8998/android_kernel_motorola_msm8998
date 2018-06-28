@@ -52,9 +52,9 @@
 		compatible = "cypress,sf3155";
 		label = "MotorolaCapSense";
 		reg = <0x1D>;
-		vdd-supply = <&pm660l_l3>;
-		vddio-supply = <&pm660l_l3>;
-		avdd-supply = <&pm660l_l3>;
+		vdd-supply = <&pm660_l14>;
+		vddio-supply = <&pm660_l14>;
+		avdd-supply = <&pm660_l14>;
 		interrupt-parent = <&tlmm>;
 		interrupts = <75 0x2008>;
 		silicon_id = <0x0BB11477>;
@@ -76,6 +76,13 @@
 		cyttsp,bootloader-addr = <0x02>;
 		cyttsp,key-num = <4>;
 		cyttsp,key-codes = <4>;
+		threshold_reg_array_len = <16>;
+		na_threshold_array_val = <0x3A 0x50 0x3B 0x00 0x3C 0x50 0x3D 0x00 0x3E 0x32
+					0x3F 0x00 0x40 0x32 0x41 0x00 0x2A 0x00 0x2B 0x10
+					0x2C 0x2C 0x2D 0x01 0x2E 0x00 0x2F 0x04 0x30 0x00 0x31 0x05>;
+		default_threshold_array_val = <0x3A 0x50 0x3B 0x00 0x3C 0x50 0x3D 0x00 0x3E 0x32
+					0x3F 0x00 0x40 0x32 0x41 0x00 0x2A 0x90 0x2B 0x01
+					0x2C 0x2C 0x2D 0x01 0x2E 0x2C 0x2F 0x01 0x30 0x2C 0x31 0x01>;
 	};
 };
 
@@ -136,13 +143,15 @@
 
 &pm660l_l3 {
 	qcom,init-ldo-mode = <1>;
-	regulator-boot-on;
-	regulator-always-on;
 };
 
 &soc {
 	fpc_fpc1020{
 		pinctrl-0 = <&fps_ldo_1P8_en_default>;
+	};
+
+	i2c_2: i2c@c176000 { /* BLSP1 QUP2 */
+		qcom,clk-freq-out = <100000>;
 	};
 };
 
@@ -157,6 +166,7 @@
 		ti,ilim = <0x0F>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&tps61280_en_default>;
+		status = "disabled";
 	};
 };
 
@@ -168,15 +178,16 @@
 		interrupt-parent = <&tlmm>;
 		interrupts = <67 0x2002>;
 		vdd-supply = <&pm660l_l3>;
-		pinctrl-names = "pmx_ts_active", "pmx_ts_suspend";
-		pinctrl-0 = <&ts_active>;
-		pinctrl-1 = <&ts_int_suspend &ts_reset_suspend>;
+		pinctrl-names = "default", "pmx_ts_active", "pmx_ts_suspend";
+		pinctrl-0 = <&ts_reset_default>;
+		pinctrl-1 = <&ts_active>;
+		pinctrl-2 = <&ts_int_suspend &ts_reset_suspend>;
 		focaltech,name = "ft5x46";
 		focaltech,family-id = <0x54>;
 		focaltech,reset-gpio = <&tlmm 66 0x00>;
 		focaltech,irq-gpio = <&tlmm 67 0x2008>;
-		focaltech,display-coords = <0 0 1080 2160>;
-		focaltech,panel-coords = <0 0 1080 2160>;
+		focaltech,display-coords = <0 0 1079 2159>;
+		focaltech,panel-coords = <0 0 1079 2159>;
 		focaltech,i2c-pull-up;
 		focaltech,group-id = <1>;
 		focaltech,hard-reset-delay-ms = <20>;
@@ -194,7 +205,7 @@
 		config_modifier-fps {
 			enable-notification;
 			fps-active {
-				touch-clip-area = <300 1870 800 1919 1>;
+				touch-clip-area = <260 2110 830 2159 1>;
 			};
 		};
 	};
@@ -203,10 +214,11 @@
 		compatible = "goodix,gt9xx-mmi";
 		reg = <0x5d>;
 		interrupt-parent = <&tlmm>;
-		interrupts = <67 0x2008>;
+		interrupts = <67 0x00>;
 		vdd_ana-supply = <&pm660l_l3>;
 		goodix,rst-gpio = <&tlmm 66 0x00>;
 		goodix,irq-gpio = <&tlmm 67 0x00>;
+		goodix,name = "gt9xx";
 		goodix,ics-slot-report;
 		goodix,driver-send-cfg;
 		goodix,create-wr-node;
@@ -216,43 +228,65 @@
 		goodix,display-coords = <0 0 1079 2159>;
 		goodix,panel-coords = <0 0 1079 2159>;
 		goodix,cfg-group0 = [
-			43 37 04 6F 08 0A 3C 00 21 CF 28
-			0F 50 32 03 05 08 08 00 00 11 11
-			06 16 19 1E 14 87 27 EE 56 58 D3
-			07 00 00 01 D3 02 11 00 00 00 00
-			00 03 40 14 14 00 00 3C 64 8F 90
-			52 08 19 00 04 9C 3F 00 91 46 00
-			88 4D 00 80 55 00 79 5F 00 79 00
+			4C 37 04 6F 08 0A FD 38 11 8F 37
+			0F 5F 3C 03 05 00 00 60 62 12 32
+			05 16 18 1C 14 87 A7 EE 45 47 0F
+			0A 00 00 00 DA 33 91 00 00 00 00
+			00 02 C4 14 32 00 1A 41 58 8A E0
+			65 07 1E 00 04 8E 43 00 8B 47 00
+			87 4B 00 84 50 00 82 55 00 82 00
 			00 00 00 00 00 00 00 00 00 00 00
-			00 00 00 00 00 00 00 00 00 00 00
-			00 00 00 00 00 00 00 00 00 00 00
-			00 00 00 01 02 03 14 1B 0C 0B 0A
+			00 00 00 00 00 00 00 02 00 00 0F
+			32 00 03 00 00 32 06 55 00 00 00
+			00 41 00 01 02 03 14 1B 0C 0B 0A
 			15 1A 19 18 17 16 13 12 11 10 09
 			08 07 06 05 04 0F 0E 0D FF FF 00
 			02 04 05 06 08 0A 1E 1F 20 22 24
-			29 2A FF FF FF 00 00 00 00 00 00
-			00 00 00 23 32 41 00 00 14 00 00
-			00 00 00 00 00 5A 00 00 00 00 00
-			00 00 00 28 5A 00 00 00 00 00 00
-			00 00 00 00 00 00 00 00 B4 00 00
+			29 2A FF FF FF 8C 31 3C 3C 00 8C
+			70 12 00 78 8C A0 19 1E 3C 0F 00
+			06 66 66 0F 10 86 85 56 00 00 00
+			00 00 00 00 00 00 00 00 00 32 28
+			00 00 0F 14 78 1F 69 00 78 78 95
+			32 03 C5 00 00 00 00 96 00 00 14
+			D7 A2 3C 78 00 01 E8 01];
+		goodix,cfg-group1 = [
+			53 37 04 6F 08 0A FD 38 11 CF 2F
+			0F 5A 3C 03 05 00 00 60 62 11 32
+			05 17 18 1C 14 87 A7 EE 2D 2F 0F
+			0A 00 00 00 FB 34 91 00 00 00 00
+			00 02 C4 0C 0A 00 1A 24 5F 8A F0
+			C7 07 0F 00 04 81 27 00 80 2E 00
+			7F 3A 00 82 4A 00 85 56 00 85 00
 			00 00 00 00 00 00 00 00 00 00 00
-			00 00 00 00 00 00 5A 01];
+			00 00 00 00 00 00 00 02 00 00 0F
+			32 00 03 00 00 32 06 55 00 00 00
+			00 41 00 01 02 03 14 1B 0C 0B 0A
+			15 1A 19 18 17 16 13 12 11 10 09
+			08 07 06 05 04 0F 0E 0D FF FF 00
+			02 04 05 06 08 0A 1E 1F 20 22 24
+			29 2A FF FF FF 8C 31 3C 3C 00 8C
+			70 12 00 C8 A0 A0 19 1E 32 3F 00
+			06 66 66 0F 10 86 85 56 00 04 09
+			00 00 00 00 00 00 00 00 00 32 46
+			00 00 0F 14 78 1F 69 00 78 78 95
+			32 02 CA 00 00 00 00 96 00 0A 50
+			D7 A2 32 50 00 01 39 01];
+		config_modifier-names = "fps";
+		config_modifier-fps {
+			enable-notification;
+			fps-active {
+				touch-clip-area = <260 2110 830 2159 1>;
+			};
+		};
 	};
 };
 
 &pm660_haptics {
-	qcom,actuator-type = "lra";
-	qcom,play-mode = "direct";
 	qcom,wave-shape = "sine";
-	qcom,vmax-mv = <2500>;
+	qcom,vmax-mv = <2545>;
 	qcom,ilim-ma = <100>;
 	qcom,wave-play-rate-us = <4255>;
-	qcom,en-brake;
-	qcom,brake-pattern = [03 03 03 03];
-
-	qcom,lra-high-z = "opt1";
-	qcom,lra-auto-res-mode = "qwd";
-	qcom,lra-res-cal-period = <4>;
+	qcom,brake-pattern = [03 03 00 00];
 };
 
 &soc{
@@ -300,12 +334,19 @@
 			pinctrl-names = "default";
 			pinctrl-0 = <&dtv_output_default &dtv_input_default>;
 			bbm-xtal-freq = <26000>;
+			dbt-charger-mitigate-enable;
 		};
 	};
 };
 
+&pm660_bcl {
+	qcom,bcl-charger-mitigate-enable;
+};
+
 &pm660_fg {
 	qcom,battery-thermal-coefficients = [92 50 ff];
+	qcom,fg-esr-tight-lt-filter-micro-pct = <20000>;
+	qcom,fg-esr-broad-lt-filter-micro-pct = <30000>;
 };
 
 &pm660_charger {
@@ -315,12 +356,14 @@
 				   <1500>,
 				   <900>,
 				   <600>,
+				   <500>,
 				   <300>;
 	qcom,mmi-temp-zones = <0 4200 620 0>,
 				<10 4200 1550 620>,
 				<15 0 1550 1550>,
 				<45 4200 3000 2000>,
 				<60 4200 1550 0>;
+	qcom,upper-limit-capacity = <75>;
 };
 
 /{
@@ -328,15 +371,24 @@
 		df-serialnum = "SB18C20873";
 
 		#include "batterydata-jt40-atl-pm660.dtsi"
+		#include "batterydata-jt40-scud-pm660.dtsi"
 	};
 };
 
 &spi_7 {
 	cs47l35: cs47l35@0 {
+		cirrus,inmode = <
+			0 0 0 1
+			0 0 0 0
+		>;
+
 		cirrus,accdet {
 			acc@1 {
 				/delete-property/ cirrus,jd-check-jd2;
 				/delete-property/ cirrus,micd-clamp-mode;
+				cirrus,init-mic-delay-ms = <200>;
+				cirrus,micd-manual-debounce = <3>;
+				cirrus,jd-alt-jd2;
 			};
 		};
 	};

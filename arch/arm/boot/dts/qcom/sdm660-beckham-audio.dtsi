@@ -20,7 +20,7 @@
 
 	cs35l36_irq_default: cs35l36_irq_default {
 		config {
-			pins = "gpio58";
+			pins = "gpio46";
 			drive-strength = <2>;
 			bias-pull-up;
 		};
@@ -37,7 +37,7 @@
 
 	gpio_usb_aud_det_n: gpio_usb_aud_det_n {
 		config {
-			pins = "gpio74";
+			pins = "gpio92";
 			bias-pull-down;
 			drive-strength = <2>;
 		};
@@ -90,6 +90,10 @@
 			"IN1BR", "MICBIAS1A",
 			"IN1BR", "MICBIAS1B";
 	};
+
+	mods_codec_shim {
+		compatible = "mmi,mods-codec-shim";
+	};
 };
 
 &slim_aud {
@@ -108,7 +112,7 @@
 		compatible = "cirrus,cs35l36";
 		reg = <0x40>;
 		reset-gpios = <&pcal_pin 9 0>;
-		irq-gpios = <&tlmm 58 0>;
+		irq-gpios = <&tlmm 46 0>;
 		interrupt-parent = <&tlmm>;
 		VA-supply = <&dummy_vreg>;
 		VP-supply = <&dummy_vreg>;
@@ -134,6 +138,10 @@
 			cirrus,irq-gpio-select = <0x01>;
 			cirrus,irq-output-enable = <0x01>;
 			cirrus,irq-src-select = <0x01>;
+		};
+		cirrus,asp-tx-config {
+			cirrus,tx1-config = /bits/ 8 <0x00 0x18>;
+			cirrus,tx2-config = /bits/ 8 <0x01 0x19>;
 		};
 	};
 };
@@ -220,7 +228,9 @@
 			acc@1 {
 				reg = <1>;
 
-				cirrus,micd-detect-debounce-ms = <600>;
+				cirrus,micd-force-micbias;
+				cirrus,micd-detect-debounce-ms = <300>;
+				cirrus,jd-wake-time= <3000>;
 				cirrus,micd-bias-start-time = <8>;
 				cirrus,micd-rate = <6>;
 				cirrus,disable-jd2-on-lineout;
@@ -232,8 +242,8 @@
 					680 0x72	/* KEY_VOLUMEDOWN */
 				>;
 				cirrus,micd-configs = <
-					0 1 0 0 1
 					1 0 1 1 0
+					0 1 0 0 1
 				>;
 				cirrus,micd-pol-gpios = <&cs47l90 3 0>,
 							<&cs47l90 4 0>;
@@ -281,7 +291,7 @@
 	pinctrl-name = "default";
 	pinctrl-0 = <&usb_aud_sw_sel>;
 
-	gpios = <&tlmm 74 0>,  /* USB_AUD_DET_N, output-high */
+	gpios = <&tlmm 92 0>,  /* USB_AUD_DET_N, output-high */
 		<&tlmm 41 0>;  /* USB_AUD_SW_SEL, output-low */
 
 	gpio-labels = "gpio_usb_aud_det_n",

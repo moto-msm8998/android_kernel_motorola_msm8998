@@ -194,6 +194,11 @@ module_param_named(
 	try_sink_enabled, __try_sink_enabled, int, 0600
 );
 
+static int __audio_headset_drp_wait_ms = 100;
+module_param_named(
+	audio_headset_drp_wait_ms, __audio_headset_drp_wait_ms, int, 0600
+);
+
 #define MICRO_1P5A		1500000
 #define MICRO_P1A		100000
 #define OTG_DEFAULT_DEGLITCH_TIME_MS	50
@@ -289,6 +294,13 @@ static int smb2_parse_dt(struct smb2 *chip)
 				&chg->hc_aicl_threshold_mv);
 	if (rc < 0)
 		chg->hc_aicl_threshold_mv = -EINVAL;
+
+	rc = of_property_read_u32(node,
+				"qcom,source-current-ma",
+				&chg->source_current_ma);
+	if (rc < 0)
+		chg->source_current_ma = DEFAULT_SOURCE_CURRENT_MA;
+
 
 	if (of_find_property(node, "qcom,thermal-mitigation", &byte_len)) {
 		chg->thermal_mitigation = devm_kzalloc(chg->dev, byte_len,
@@ -556,7 +568,9 @@ static int smb2_usb_set_prop(struct power_supply *psy,
 #endif
 		break;
 	case POWER_SUPPLY_PROP_PD_VOLTAGE_MIN:
+#ifdef QCOM_BASE
 		rc = smblib_set_prop_pd_voltage_min(chg, val);
+#endif
 		break;
 	case POWER_SUPPLY_PROP_SDP_CURRENT_MAX:
 		rc = smblib_set_prop_sdp_current_max(chg, val);
@@ -966,6 +980,13 @@ static int mmi_wls_get_property(struct power_supply *psy,
 	struct smb_charger *chip = power_supply_get_drvdata(psy);
 	struct power_supply *eb_pwr_psy =
 		power_supply_get_by_name((char *)chip->mmi.eb_pwr_psy_name);
+	struct power_supply *inner_wls_psy =
+		power_supply_get_by_name((char *)chip->mmi.inner_wls_name);
+
+	if (chip->mmi.inner_wls_used && inner_wls_psy) {
+		rc = power_supply_get_property(inner_wls_psy, prop, val);
+		return rc;
+	}
 
 	if (eb_pwr_psy) {
 		rc = power_supply_get_property(eb_pwr_psy,
@@ -1017,6 +1038,17 @@ static int mmi_wls_is_writeable(struct power_supply *psy,
 				enum power_supply_property prop)
 {
 	int rc;
+	struct smb_charger *chip = power_supply_get_drvdata(psy);
+	struct power_supply *inner_wls_psy =
+		power_supply_get_by_name((char *)chip->mmi.inner_wls_name);
+
+	if (chip->mmi.inner_wls_used && inner_wls_psy) {
+		if (!inner_wls_psy->desc->property_is_writeable)
+			return 0;
+		rc = inner_wls_psy->desc->property_is_writeable(inner_wls_psy,
+						prop);
+		return rc;
+	}
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
@@ -1036,6 +1068,13 @@ static int mmi_wls_set_property(struct power_supply *psy,
 {
 	int rc = 0;
 	struct smb_charger *chip = power_supply_get_drvdata(psy);
+	struct power_supply *inner_wls_psy =
+		power_supply_get_by_name((char *)chip->mmi.inner_wls_name);
+
+	if (chip->mmi.inner_wls_used && inner_wls_psy) {
+		rc = power_supply_set_property(inner_wls_psy, prop, val);
+		return rc;
+	}
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
@@ -1051,6 +1090,13 @@ static int mmi_wls_set_property(struct power_supply *psy,
 	return rc;
 }
 
+static void smb2_wls_external_power_changed(struct power_supply *psy)
+{
+	struct smb2 *chip = power_supply_get_drvdata(psy);
+
+	if (chip->chg.mmi.inner_wls_used)
+		smblib_inner_wls_power_change(&chip->chg);
+}
 
 static const struct power_supply_desc wls_psy_desc = {
 	.name = "wireless",
@@ -1060,6 +1106,7 @@ static const struct power_supply_desc wls_psy_desc = {
 	.get_property = mmi_wls_get_property,
 	.set_property = mmi_wls_set_property,
 	.property_is_writeable = mmi_wls_is_writeable,
+	.external_power_changed = smb2_wls_external_power_changed,
 };
 
 static int smb2_init_wls_psy(struct smb2 *chip)
@@ -1796,16 +1843,18 @@ static int smb2_configure_typec(struct smb_charger *chg)
 		return rc;
 	}
 
-#ifdef QCOM_BASE
-	/* increase VCONN softstart */
-	rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
-			VCONN_SOFTSTART_CFG_MASK, VCONN_SOFTSTART_CFG_MASK);
-#else
-	/* increase VCONN softstart and advertise default current*/
-	rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
-			VCONN_SOFTSTART_CFG_MASK | EN_80UA_180UA_CUR_SOURCE_BIT,
-			VCONN_SOFTSTART_CFG_MASK);
-#endif
+	if (chg->source_current_ma >= DEFAULT_SOURCE_CURRENT_MA)
+		/* increase VCONN softstart */
+		rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
+				VCONN_SOFTSTART_CFG_MASK,
+				VCONN_SOFTSTART_CFG_MASK);
+	else
+		/* increase VCONN softstart and advertise default current*/
+		rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
+				VCONN_SOFTSTART_CFG_MASK |
+				EN_80UA_180UA_CUR_SOURCE_BIT,
+				VCONN_SOFTSTART_CFG_MASK);
+
 	if (rc < 0) {
 		dev_err(chg->dev, "Couldn't increase VCONN softstart rc=%d\n",
 			rc);
@@ -2265,6 +2314,18 @@ static int smb2_init_hw(struct smb2 *chip)
 			return rc;
 		}
 	}
+
+	if (chg->mmi.inner_wls_used) {
+		rc = smblib_write(chg, DCIN_ADAPTER_ALLOW_CFG_REG,
+				USBIN_ADAPTER_ALLOW_5V_TO_9V);
+		if (rc < 0) {
+			dev_err(chg->dev,
+				"Couldn't configure dcin range, rc=%d\n",
+				rc);
+			return rc;
+		}
+	}
+
 	return rc;
 }
 
@@ -2777,6 +2838,7 @@ static int smb2_probe(struct platform_device *pdev)
 	chg->mode = PARALLEL_MASTER;
 	chg->irq_info = smb2_irqs;
 	chg->name = "PMI";
+	chg->audio_headset_drp_wait_ms = &__audio_headset_drp_wait_ms;
 	chg->suspended = false;
 
 	chg->regmap = dev_get_regmap(chg->dev->parent, NULL);

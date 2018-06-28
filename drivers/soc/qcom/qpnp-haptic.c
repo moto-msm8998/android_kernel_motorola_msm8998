@@ -2052,6 +2052,9 @@ static int qpnp_hap_set(struct qpnp_hap *hap, bool on)
 	} else if (hap->play_mode == QPNP_HAP_BUFFER ||
 			hap->play_mode == QPNP_HAP_DIRECT) {
 		if (on) {
+			if (hap->module_en == on )
+				return 0;
+
 			rc = qpnp_hap_auto_res_enable(hap, 0);
 			if (rc < 0)
 				return rc;
@@ -2064,9 +2067,11 @@ static int qpnp_hap_set(struct qpnp_hap *hap, bool on)
 			if (rc < 0)
 				return rc;
 
-			rc = qpnp_hap_auto_res_enable(hap, 1);
-			if (rc < 0)
-				return rc;
+			if (hap->ares_cfg.auto_res_mode != QPNP_HAP_AUTO_RES_NONE) {
+			       rc = qpnp_hap_auto_res_enable(hap, 1);
+			       if (rc < 0)
+				      return rc;
+			}
 
 			if (is_sw_lra_auto_resonance_control(hap)) {
 				/*
@@ -2687,6 +2692,9 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 			if (hap->pmic_subtype == PM660_SUBTYPE) {
 				hap->ares_cfg.auto_res_mode =
 						QPNP_HAP_PM660_AUTO_RES_QWD;
+				if (strcmp(temp_str, "none") == 0)
+					hap->ares_cfg.auto_res_mode =
+						QPNP_HAP_AUTO_RES_NONE;
 				if (strcmp(temp_str, "zxd") == 0)
 					hap->ares_cfg.auto_res_mode =
 						QPNP_HAP_PM660_AUTO_RES_ZXD;

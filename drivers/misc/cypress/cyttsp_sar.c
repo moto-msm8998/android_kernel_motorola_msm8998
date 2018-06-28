@@ -35,14 +35,13 @@
 #include <linux/usb.h>
 #include <linux/power_supply.h>
 
-#define CYTTSP_DEBUG 1
+#define CYTTSP_DEBUG 0
 #define LOG_TAG "cyttsp "
 #if CYTTSP_DEBUG
 #define LOG_INFO(fmt, args...)    pr_info(LOG_TAG fmt, ##args)
 #else
 #define LOG_INFO(fmt, args...)
 #endif
-
 struct cycapsense_ctrl_data *ctrl_data;
 static int programming_done;
 static int fw_dl_status;
@@ -64,7 +63,6 @@ static int cyttsp_i2c_read_block(struct device *dev, u8 addr,
 	}
 
 	ret = i2c_master_recv(client, data, len);
-
 	return (ret < 0) ? ret : ret != len ? -EIO : 0;
 }
 
@@ -72,14 +70,43 @@ static u8 cyttsp_read_reg(struct cyttsp_sar_data *data, u8 reg)
 {
 	int ret;
 	u8 val;
+	u8 buffer[2];
+	struct device *dev = &data->client->dev;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct cyttsp_sar_platform_data *pdata = data->pdata;
 
+	mutex_lock(&pdata->i2c_mutex);
 	ret = cyttsp_i2c_read_block(&data->client->dev,
 			reg, 1, &val);
 	if (ret < 0) {
 		dev_err(&data->client->dev, "Failed to read reg!\n");
+		disable_irq_nosync(gpio_to_irq(pdata->irq_gpio));
+		dev_err(&data->client->dev, "irq disable before reset chip!\n");
+		gpio_direction_output(ctrl_data->hssp_d.rst_gpio, 0);
+		dev_err(&data->client->dev, "direction out, value = 0\n");
+		msleep(1);
+		gpio_set_value(ctrl_data->hssp_d.rst_gpio, 1);
+		dev_err(&data->client->dev, "direction out, value = 1\n");
+		msleep(100);
+		if (data->enable == true) {
+			buffer[0] = CYTTSP_NORMAL_MODE;
+			buffer[1] = 0x00;
+			ret = i2c_master_send(client, buffer, sizeof(buffer));
+			if (ret != sizeof(buffer))
+				dev_err(&data->client->dev, "enable channel after reset chip failed\n");
+			buffer[0] = CYTTSP_SAR_CHANNEL_ENABLE;
+			buffer[1] = 0x0f;
+			ret = i2c_master_send(client, buffer, sizeof(buffer));
+			if (ret != sizeof(buffer))
+				dev_err(&data->client->dev, "enable channel after reset chip failed\n");
+		}
+		enable_irq(gpio_to_irq(pdata->irq_gpio));
+		dev_err(&data->client->dev, "irq enable after reset chip!\n");
+		mutex_unlock(&pdata->i2c_mutex);
+		dev_err(&data->client->dev, "mutex unlock after reset chip!\n");
 		return ret;
 	}
-
+	mutex_unlock(&pdata->i2c_mutex);
 	return val;
 }
 
@@ -90,15 +117,42 @@ static int cyttsp_write_reg(struct cyttsp_sar_data *data,
 	u8 buffer[2];
 	struct device *dev = &data->client->dev;
 	struct i2c_client *client = to_i2c_client(dev);
+	struct cyttsp_sar_platform_data *pdata = data->pdata;
 
 	buffer[0] = reg;
 	buffer[1] = val;
 
+	mutex_lock(&pdata->i2c_mutex);
 	ret = i2c_master_send(client, buffer, sizeof(buffer));
 	if (ret != sizeof(buffer)) {
-		dev_err(&data->client->dev, "Failed to write reg!\n");
+		dev_err(&data->client->dev, "Failed to write %x reg!\n", buffer[0]);
+		disable_irq_nosync(gpio_to_irq(pdata->irq_gpio));
+		dev_err(&data->client->dev, "irq disable before reset chip!\n");
+		gpio_direction_output(ctrl_data->hssp_d.rst_gpio, 0);
+		dev_err(&data->client->dev, "direction out, value = 0\n");
+		msleep(1);
+		gpio_set_value(ctrl_data->hssp_d.rst_gpio, 1);
+		dev_err(&data->client->dev, "direction out, value = 1\n");
+		msleep(100);
+		if (data->enable == true) {
+			buffer[0] = CYTTSP_NORMAL_MODE;
+			buffer[1] = 0x00;
+			ret = i2c_master_send(client, buffer, sizeof(buffer));
+			if (ret != sizeof(buffer))
+				dev_err(&data->client->dev, "enable channel after reset chip failed\n");
+			buffer[0] = CYTTSP_SAR_CHANNEL_ENABLE;
+			buffer[1] = 0x0f;
+			ret = i2c_master_send(client, buffer, sizeof(buffer));
+			if (ret != sizeof(buffer))
+				dev_err(&data->client->dev, "enable channel after reset chip failed\n");
+		}
+		enable_irq(gpio_to_irq(pdata->irq_gpio));
+		dev_err(&data->client->dev, "irq enable after reset chip!\n");
+		mutex_unlock(&pdata->i2c_mutex);
+		dev_err(&data->client->dev, "mutex unlock after reset chip!\n");
 		return ret;
 	}
+	mutex_unlock(&pdata->i2c_mutex);
 
 	return 0;
 }
@@ -293,9 +347,21 @@ static int cyttsp_sar_parse_dt(struct device *dev,
 }
 #endif
 
-static irqreturn_t cyttsp_sar_interrupt(int irq, void *dev_id)
+static irqreturn_t cyttsp_sar_eint_func(int irq, void *dev_id)
 {
 	struct cyttsp_sar_data *data = dev_id;
+	struct cyttsp_sar_platform_data *pdata = data->pdata;
+
+	disable_irq_nosync(gpio_to_irq(pdata->irq_gpio));
+	wake_lock_timeout(&data->cap_lock, msecs_to_jiffies(100));
+	schedule_delayed_work(&data->eint_work, 0);
+
+	return IRQ_HANDLED;
+}
+
+static void cyttsp_sar_eint_work(struct work_struct *work)
+{
+	struct cyttsp_sar_data *data = pcyttsp_sar_ptr;
 	struct cyttsp_sar_platform_data *pdata = data->pdata;
 	u8 temp[3];
 	u32 sar_state = 0;
@@ -312,13 +378,15 @@ static irqreturn_t cyttsp_sar_interrupt(int irq, void *dev_id)
 		0x00003000,
 		0x0000C000  };
 
-	dev_info(&data->client->dev, "cypress irq handler!\n");
+	LOG_INFO("cypress irq handler!\n");
 
 	if (data->enable) {
 		ret = cyttsp_i2c_read_block(&data->client->dev, CYTTSP_REG_INTERRUPT_PEDNING, 3, &temp[0]);
 		if (ret < 0) {
 			dev_err(&data->client->dev, "Failed to read interrupt pending regsiter!\n");
-			return IRQ_NONE;
+			enable_irq(gpio_to_irq(pdata->irq_gpio));
+			dev_err(&data->client->dev, "enable irq in interrupt\n");
+			return;
 		}
 
 		sensor_status = ((unsigned long)temp[1] +  (unsigned long)(temp[2] << 8));
@@ -331,6 +399,7 @@ static irqreturn_t cyttsp_sar_interrupt(int irq, void *dev_id)
 				sar_state = (sensor_status & channel_status_mask[i]) >> (i * 2);
 
 				if (sar_state < CYTTSP_SAR_STATE_ERROR) {
+					LOG_INFO("update channel%d status : %x\n", i, sar_state);
 					input_report_abs(data->input_dev[i], ABS_DISTANCE, sar_state);
 					input_sync(data->input_dev[i]);
 				} else {
@@ -343,7 +412,7 @@ static irqreturn_t cyttsp_sar_interrupt(int irq, void *dev_id)
 
 	data->sensorStatus = sensor_status;
 
-	return IRQ_HANDLED;
+	enable_irq(gpio_to_irq(pdata->irq_gpio));
 }
 
 /**
@@ -366,7 +435,7 @@ static void hw_init(void)
 				pdata->pi2c_reg[i].reg, pdata->pi2c_reg[i].val);
 		ret = cyttsp_write_reg(data, pdata->pi2c_reg[i].reg, pdata->pi2c_reg[i].val);
 		if (ret < 0)
-			LOG_INFO("reg write failed\n");
+			dev_err(&data->client->dev, "reg write failed\n");
 		i++;
 	}
 
@@ -747,6 +816,11 @@ int __cycapsense_fw_update(struct cycapsense_ctrl_data *data)
 		fw_dl_status = 0;
 	}
 
+	error = cyttsp_write_reg(pcyttsp_sar_ptr, CYTTSP_SAR_OP_MODE, 0x01);
+	if (error < 0)
+		dev_err(data->dev, "reg write failed\n");
+	pcyttsp_sar_ptr->enable = false;
+
 fw_upd_end:
 	if (inf->data != NULL) {
 		kfree(inf->data);
@@ -785,7 +859,7 @@ static int capsensor_set_enable(struct sensors_classdev *sensors_cdev, unsigned 
 		LOG_INFO("disable cap sensor\n");
 		ret = cyttsp_write_reg(data, CYTTSP_SAR_OP_MODE, 0x01);
 		if (ret < 0)
-			LOG_INFO("reg write failed\n");
+			dev_err(&data->client->dev, "reg write failed\n");
 
 		for (i = 0; i < pdata->nsars; i++) {
 			input = data->input_dev[i];
@@ -794,7 +868,7 @@ static int capsensor_set_enable(struct sensors_classdev *sensors_cdev, unsigned 
 		}
 		data->enable = false;
 	} else {
-		LOG_INFO("unknown enable symbol\n");
+		dev_err(&data->client->dev, "unknown enable symbol\n");
 	}
 
 	return 0;
@@ -935,22 +1009,84 @@ static ssize_t cycapsense_fw_store(struct class *class,
 	return count;
 }
 
-static ssize_t cycapsense_reset_show(struct class *class,
-		struct class_attribute *attr,
-		char *buf)
-{
-	return snprintf(buf, 8, "%d\n", programming_done);
-}
-
 static ssize_t cycapsense_reset_store(struct class *class,
 		struct class_attribute *attr,
 		const char *buf, size_t count)
 {
+	struct cyttsp_sar_data *data = pcyttsp_sar_ptr;
+	struct cyttsp_sar_platform_data *pdata = data->pdata;
+	struct input_dev *input;
+	int i, ret;
+
 	if (!count)
 		return -EINVAL;
 
-	if (!strncmp(buf, "reset", 5) || !strncmp(buf, "1", 1))
-		cycapsense_reset();
+	if (!strncmp(buf, "reset", 5) || !strncmp(buf, "1", 1)) {
+		LOG_INFO("Going to refresh baseline\n");
+		ret = cyttsp_write_reg(data, CYTTSP_SAR_REFRESH_BASELINE, 0x01);
+		if (ret < 0)
+			dev_err(&data->client->dev, "reg write failed\n");
+
+		for (i = 0; i < pdata->nsars; i++) {
+			input = data->input_dev[i];
+			input_report_abs(input, ABS_DISTANCE, 0);
+			input_sync(input);
+		}
+	}
+
+	return count;
+}
+
+static ssize_t cycapsense_set_threshold_store(struct class *class,
+		struct class_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct cyttsp_sar_data *data = pcyttsp_sar_ptr;
+	int i, ret;
+	u32 threshold_array_len = 0;
+	u32 *threshold_array_data;
+	struct device_node *np = data->client->dev.of_node;
+
+	if (!count)
+		return -EINVAL;
+
+	LOG_INFO("start set threshold, sku = %s\n", buf);
+
+	ret = of_property_read_u32(np, "threshold_reg_array_len",
+					&threshold_array_len);
+	if (ret < 0) {
+		dev_err(&data->client->dev, "data_array_len read error");
+	}
+
+	threshold_array_data = kmalloc(threshold_array_len * 2 * sizeof(u32),
+					GFP_KERNEL);
+
+	if (!strncmp(buf, "NA", 2)) {
+		ret = of_property_read_u32_array(np, "na_threshold_array_val",
+				threshold_array_data,
+				threshold_array_len * 2);
+		if (ret < 0)
+			dev_err(&data->client->dev, "data_array_val read error");
+	} else {
+		dev_err(&data->client->dev, "radio is not NA, radio = %s", buf);
+		ret = of_property_read_u32_array(np, "default_threshold_array_val",
+				threshold_array_data,
+				threshold_array_len * 2);
+		if (ret < 0)
+			dev_err(&data->client->dev, "data_array_val read error");
+	}
+
+	for (i = 0; i < threshold_array_len; i++) {
+		LOG_INFO("Going to Write Reg: 0x%x Value: 0x%x\n",
+				threshold_array_data[i*2],
+				threshold_array_data[i*2 + 1]);
+
+		ret = cyttsp_write_reg(data, threshold_array_data[i*2],
+					threshold_array_data[i*2 + 1]);
+		if (ret < 0)
+			dev_err(&data->client->dev, "reg write failed");
+	}
+
 
 	return count;
 }
@@ -987,7 +1123,7 @@ static ssize_t cycapsense_enable_store(struct class *class,
 		LOG_INFO("disable cap sensor\n");
 		ret = cyttsp_write_reg(data, CYTTSP_SAR_OP_MODE, 0x01);
 		if (ret < 0)
-			LOG_INFO("reg write failed\n");
+			dev_err(&data->client->dev, "reg write failed\n");
 
 		for (i = 0; i < pdata->nsars; i++) {
 			input = data->input_dev[i];
@@ -996,7 +1132,7 @@ static ssize_t cycapsense_enable_store(struct class *class,
 		}
 		data->enable = false;
 	} else {
-		LOG_INFO("unknown enable symbol\n");
+		dev_err(&data->client->dev, "unknown enable symbol\n");
 	}
 
 	return count;
@@ -1029,7 +1165,7 @@ static ssize_t cycapsense_reg_store(struct class *class,
 	if (sscanf(buf, "%x,%x", &reg, &val) == 2) {
 		ret = cyttsp_write_reg(data, *((u8 *)&reg), *((u8 *)&val));
 		if (ret < 0)
-			LOG_INFO("reg write failed\n");
+			dev_err(&data->client->dev, "reg write failed\n");
 	}
 
 	return count;
@@ -1138,7 +1274,8 @@ static ssize_t cycapsense_fw_download_status_show(struct class *class,
 }
 
 static CLASS_ATTR(fw_update, 0660, cycapsense_fw_show, cycapsense_fw_store);
-static CLASS_ATTR(reset, 0660, cycapsense_reset_show, cycapsense_reset_store);
+static CLASS_ATTR(set_threshold, 0660, NULL, cycapsense_set_threshold_store);
+static CLASS_ATTR(reset, 0660, NULL, cycapsense_reset_store);
 static CLASS_ATTR(enable, 0660, cycapsense_enable_show, cycapsense_enable_store);
 static CLASS_ATTR(reg, 0660, cycapsense_reg_show, cycapsense_reg_store);
 static CLASS_ATTR(debug, 0660, NULL, cycapsense_debug_store);
@@ -1155,7 +1292,7 @@ static void ps_notify_callback_work(struct work_struct *work)
 	LOG_INFO("Going to force calibrate\n");
 	ret = cyttsp_write_reg(data, CYTTSP_SAR_REFRESH_BASELINE, 0x0f);
 	if (ret < 0)
-		LOG_INFO("reg write failed\n");
+		dev_err(&data->client->dev, "reg write failed\n");
 
 	for (i = 0; i < pdata->nsars; i++) {
 		input = data->input_dev[i];
@@ -1252,7 +1389,7 @@ static int cyttsp_sar_probe(struct i2c_client *client,
 	if (error)
 		return error;
 	client->irq = pdata->irq_gpio;
-
+	mutex_init(&pdata->i2c_mutex);
 
 	cyttsp_reg_setup_init(client);
 	pdata->pi2c_reg = cyttsp_i2c_reg_setup;
@@ -1315,19 +1452,22 @@ static int cyttsp_sar_probe(struct i2c_client *client,
 
 		error = sensors_classdev_register(&data->input_dev[i]->dev, &sensors_capsensor_cdev[i]);
 		if (error < 0)
-			LOG_INFO("create %d cap sensor_class  file failed (%d)\n", i, error);
+			dev_err(&client->dev, "create %d cap sensor_class  file failed (%d)\n", i, error);
 
 	}
 
-	error = request_threaded_irq(gpio_to_irq(client->irq), NULL, cyttsp_sar_interrupt,
-			IRQF_TRIGGER_FALLING | IRQF_ONESHOT, client->dev.driver->name, data);
-
+	error = request_irq(gpio_to_irq(client->irq), cyttsp_sar_eint_func,
+			IRQF_TRIGGER_FALLING, client->dev.driver->name, data);
 
 	dev_err(&client->dev, "registering irq %d\n", gpio_to_irq(client->irq));
 	if (error) {
 		dev_err(&client->dev, "Error %d registering irq %d\n", error, gpio_to_irq(client->irq));
 		goto err_irq_gpio_req;
 	}
+
+	INIT_DELAYED_WORK(&data->eint_work, cyttsp_sar_eint_work);
+
+	wake_lock_init(&data->cap_lock, WAKE_LOCK_SUSPEND, "capsense wakelock");
 
 	error = class_register(&capsense_class);
 	if (error < 0) {
@@ -1354,6 +1494,13 @@ static int cyttsp_sar_probe(struct i2c_client *client,
 	if (error < 0) {
 		dev_err(&client->dev,
 				"Create reg file failed (%d)\n", error);
+		return error;
+	}
+
+	error = class_create_file(&capsense_class, &class_attr_set_threshold);
+	if (error < 0) {
+		dev_err(&client->dev,
+				"Create set_threshold file failed (%d)\n", error);
 		return error;
 	}
 
@@ -1411,11 +1558,6 @@ static int cyttsp_sar_probe(struct i2c_client *client,
 
 	schedule_work(&ctrl_data->work);
 
-	error = cyttsp_write_reg(data, CYTTSP_SAR_OP_MODE, 0x01);
-	if (error < 0)
-		LOG_INFO("reg write failed\n");
-	data->enable = false;
-
 	return 0;
 
 free_ps_notifier:
@@ -1435,6 +1577,7 @@ static int cyttsp_sar_remove(struct i2c_client *client)
 	int i;
 
 	free_irq(client->irq, data);
+	wake_lock_destroy(&data->cap_lock);
 	for (i = 0; i < 4; i++) {
 		input_unregister_device(data->input_dev[i]);
 	}
@@ -1458,6 +1601,35 @@ static void cyttsp_sar_shutdown(struct i2c_client *client)
 	disable_irq(client->irq);
 }
 
+static int cypress_i2c_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct cyttsp_sar_data *data = i2c_get_clientdata(client);
+	const struct cyttsp_sar_platform_data *pdata = data->pdata;
+
+	disable_irq(gpio_to_irq(pdata->irq_gpio));
+	dev_dbg(&client->dev, "cypress i2c suspend\n");
+
+	return 0;
+}
+
+static int cypress_i2c_resume(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct cyttsp_sar_data *data = i2c_get_clientdata(client);
+	const struct cyttsp_sar_platform_data *pdata = data->pdata;
+
+	enable_irq(gpio_to_irq(pdata->irq_gpio));
+	dev_dbg(&client->dev, "cypress i2c resume\n");
+
+	return 0;
+}
+
+static const struct dev_pm_ops cypress_i2c_pm_ops = {
+	.suspend        = cypress_i2c_suspend,
+	.resume         = cypress_i2c_resume,
+};
+
 static const struct i2c_device_id cyt_id[] = {
 	{"cyttsp_streetfighter", 0},
 	{ },
@@ -1476,6 +1648,7 @@ static struct i2c_driver cyttsp_sar_driver = {
 	.driver = {
 		.name	= "cyttsp_streetfighter",
 		.owner	= THIS_MODULE,
+		.pm     = &cypress_i2c_pm_ops,
 		.of_match_table = cyttsp_match_table,
 	},
 	.probe		= cyttsp_sar_probe,

@@ -424,6 +424,28 @@ int smblib_set_charge_param(struct smb_charger *chg,
 	return rc;
 }
 
+static int mmi_set_usb_en_polarity(struct smb_charger *chip,
+			enum usb_en_pol pol)
+{
+	int rc = 0;
+	static int pre_pol = -1;
+
+	if (pre_pol == pol) {
+		pr_info("PMI: %s same pol(%d) ignore!\n", __func__, pol);
+		return 0;
+	}
+	pre_pol = pol;
+
+	rc = smblib_masked_write(chip, MISC_BUCKBOOST_CFG,
+				USB_EN_POLARITY,
+				pol ? USB_EN_POLARITY:0);
+	if (rc < 0)
+		smblib_err(chip, "%s Couldn't set 0x%x rc=%d\n",
+				__func__, MISC_BUCKBOOST_CFG, rc);
+
+	return rc;
+}
+
 int smblib_set_usb_suspend(struct smb_charger *chg, bool suspend)
 {
 	int rc = 0;
@@ -446,6 +468,15 @@ int smblib_set_usb_suspend(struct smb_charger *chg, bool suspend)
 		if (!chg->usb_icl_change_irq_enabled) {
 			enable_irq(irq);
 			chg->usb_icl_change_irq_enabled = true;
+		}
+	}
+
+	if ((chg->single_path_usbin_switch) && (suspend)) {
+		if (chg->mmi.ebchg_state == EB_SINK) {
+			pr_info("PMI: %s usb suspend when eb sink, toggle usb_en pol\n", __func__);
+			mmi_set_usb_en_polarity(chg, USB_EN_ACTIVE_HIGH);
+		} else {
+			mmi_set_usb_en_polarity(chg, USB_EN_ACTIVE_LOW);
 		}
 	}
 
@@ -1077,6 +1108,36 @@ int smblib_get_icl_current(struct smb_charger *chg, int *icl_ua)
 	return 0;
 }
 
+int smblib_inner_wls_power_change(struct smb_charger *chg)
+{
+	int rc = 0;
+	union power_supply_propval prop = {0,};
+
+	if (!chg->mmi.inner_wls_used || !chg->mmi.wls_psy)
+		return 0;
+
+	rc = power_supply_get_property(chg->mmi.wls_psy,
+			POWER_SUPPLY_PROP_VOLTAGE_MAX, &prop);
+	if (rc < 0)
+		smblib_err(chg, "Couldn't read volt max prop, rc=%d\n", rc);
+
+	chg->mmi.inner_wls_vmax = prop.intval / 1000;
+
+	prop.intval = 0;
+	rc = power_supply_get_property(chg->mmi.wls_psy,
+			POWER_SUPPLY_PROP_CURRENT_MAX, &prop);
+	if (rc < 0)
+		smblib_err(chg, "Couldn't read current max prop, rc=%d\n", rc);
+
+	chg->mmi.inner_wls_imax = prop.intval / 1000;
+
+	cancel_delayed_work(&chg->mmi.heartbeat_work);
+	schedule_delayed_work(&chg->mmi.heartbeat_work,
+			      msecs_to_jiffies(0));
+
+	return rc;
+}
+
 /*********************
  * VOTABLE CALLBACKS *
  *********************/
@@ -1569,6 +1630,58 @@ out:
 	return rc;
 }
 
+static int _smblib_inner_wls_otg_enable(struct smb_charger *chg)
+{
+	int rc = 0;
+	union power_supply_propval prop = {0,};
+	struct power_supply *inner_wls_psy =
+		power_supply_get_by_name((char *)chg->mmi.inner_wls_name);
+
+	if (!inner_wls_psy)
+		return 0;
+
+	rc = power_supply_set_property(inner_wls_psy,
+				POWER_SUPPLY_PROP_CHARGING_ENABLED, &prop);
+	if (rc < 0) {
+		smblib_err(chg, "Couldn't disable wls charging, rc=%d\n", rc);
+		return rc;
+	}
+
+	chg->mmi.wls_otg_pinctrl = pinctrl_get_select(chg->dev, "wls_otg_en");
+	if (!chg->mmi.wls_otg_pinctrl) {
+		smblib_err(chg, "Couldn't set pinctrl wls_otg_en\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int _smblib_inner_wls_otg_disable(struct smb_charger *chg)
+{
+	int rc = 0;
+	union power_supply_propval prop = {1,};
+	struct power_supply *inner_wls_psy =
+		power_supply_get_by_name((char *)chg->mmi.inner_wls_name);
+
+	if (!inner_wls_psy)
+		return 0;
+
+	chg->mmi.wls_otg_pinctrl = pinctrl_get_select(chg->dev, "wls_otg_dis");
+	if (!chg->mmi.wls_otg_pinctrl) {
+		smblib_err(chg, "Couldn't set pinctrl wls_otg_dis\n");
+		return -EINVAL;
+	}
+
+	rc = power_supply_set_property(inner_wls_psy,
+				POWER_SUPPLY_PROP_CHARGING_ENABLED, &prop);
+	if (rc < 0) {
+		smblib_err(chg, "Couldn't enable wls charging, rc=%d\n", rc);
+		return rc;
+	}
+
+	return 0;
+}
+
 static int _smblib_vbus_regulator_enable(struct regulator_dev *rdev)
 {
 	struct smb_charger *chg = rdev_get_drvdata(rdev);
@@ -1611,16 +1724,28 @@ int smblib_vbus_regulator_enable(struct regulator_dev *rdev)
 	if (!chg->usb_icl_votable) {
 		chg->usb_icl_votable = find_votable("USB_ICL");
 
-		if (!chg->usb_icl_votable)
-			return -EINVAL;
+		if (!chg->usb_icl_votable) {
+			rc = -EINVAL;
+			goto unlock;
+		}
 	}
+
+	if (chg->mmi.inner_wls_used && chg->mmi.wls_otg_pinctrl) {
+		rc = _smblib_inner_wls_otg_enable(chg);
+		if (rc)
+			goto unlock;
+	}
+
 	vote(chg->usb_icl_votable, USBIN_USBIN_BOOST_VOTER, true, 0);
 
 	rc = _smblib_vbus_regulator_enable(rdev);
 	if (rc >= 0)
 		chg->otg_en = true;
-	else
+	else {
+		if (chg->mmi.inner_wls_used && chg->mmi.wls_otg_pinctrl)
+			_smblib_inner_wls_otg_disable(chg);
 		vote(chg->usb_icl_votable, USBIN_USBIN_BOOST_VOTER, false, 0);
+	}
 
 unlock:
 	mutex_unlock(&chg->otg_oc_lock);
@@ -1676,6 +1801,10 @@ int smblib_vbus_regulator_disable(struct regulator_dev *rdev)
 
 	if (chg->usb_icl_votable)
 		vote(chg->usb_icl_votable, USBIN_USBIN_BOOST_VOTER, false, 0);
+
+	if (chg->mmi.inner_wls_used && chg->mmi.wls_otg_pinctrl)
+		rc = _smblib_inner_wls_otg_disable(chg);
+
 unlock:
 	mutex_unlock(&chg->otg_oc_lock);
 	return rc;
@@ -2980,16 +3109,18 @@ int smblib_set_prop_typec_power_role(struct smb_charger *chg,
 			smblib_err(chg, "Couldn't write to TM_IO_DTEST4_SEL rc=%d\n",
 				rc);
 		}
-#ifndef QCOM_BASE
-		/* increase VCONN softstart and advertise default current*/
-		rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
-				VCONN_SOFTSTART_CFG_MASK | EN_80UA_180UA_CUR_SOURCE_BIT,
-				VCONN_SOFTSTART_CFG_MASK);
-		if (rc < 0) {
-			smblib_err(chg, "Couldn't write to TYPE_C_CFG_2_REG rc=%d\n",
-				rc);
+
+		if (chg->source_current_ma < DEFAULT_SOURCE_CURRENT_MA) {
+			/* increase VCONN softstart and advertise default current*/
+			rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
+					VCONN_SOFTSTART_CFG_MASK |
+					EN_80UA_180UA_CUR_SOURCE_BIT,
+					VCONN_SOFTSTART_CFG_MASK);
+			if (rc < 0) {
+				smblib_err(chg, "Couldn't write to TYPE_C_CFG_2_REG rc=%d\n",
+					rc);
+			}
 		}
-#endif
 	}
 
 	rc = smblib_masked_write(chg, TYPE_C_INTRPT_ENB_SOFTWARE_CTRL_REG,
@@ -3129,16 +3260,19 @@ int smblib_set_prop_pd_active(struct smb_charger *chg,
 		if (rc < 0)
 			smblib_err(chg, "Couldn't unvote USB_PSY rc=%d\n", rc);
 	} else {
-#ifndef QCOM_BASE
-		/* increase VCONN softstart and advertise default current*/
-		rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
-				VCONN_SOFTSTART_CFG_MASK | EN_80UA_180UA_CUR_SOURCE_BIT,
-				VCONN_SOFTSTART_CFG_MASK);
-		if (rc < 0) {
-			smblib_err(chg, "Couldn't write to TYPE_C_CFG_2_REG rc=%d\n",
-				rc);
+
+		if (chg->source_current_ma < DEFAULT_SOURCE_CURRENT_MA) {
+			/* increase VCONN softstart and advertise default current*/
+			rc = smblib_masked_write(chg, TYPE_C_CFG_2_REG,
+					VCONN_SOFTSTART_CFG_MASK |
+					EN_80UA_180UA_CUR_SOURCE_BIT,
+					VCONN_SOFTSTART_CFG_MASK);
+			if (rc < 0) {
+				smblib_err(chg, "Couldn't write to TYPE_C_CFG_2_REG rc=%d\n",
+					rc);
+			}
 		}
-#endif
+
 		rc = smblib_read(chg, APSD_STATUS_REG, &stat);
 		if (rc < 0) {
 			smblib_err(chg, "Couldn't read APSD status rc=%d\n",
@@ -4178,6 +4312,21 @@ static int typec_try_sink(struct smb_charger *chg)
 	bool debounce_done, vbus_detected, sink;
 	u8 stat;
 	int exit_mode = ATTACHED_SRC, rc;
+	int typec_mode;
+	int count;
+
+	if (!(*chg->try_sink_enabled))
+		return ATTACHED_SRC;
+
+	typec_mode = smblib_get_prop_typec_mode(chg);
+	if (typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER
+		|| typec_mode == POWER_SUPPLY_TYPEC_SINK_DEBUG_ACCESSORY)
+		return ATTACHED_SRC;
+
+	/*
+	 * Try.SNK entry status - ATTACHWAIT.SRC state and detected Rd-open
+	 * or RD-Ra for TccDebounce time.
+	 */
 
 	/* ignore typec interrupt while try.snk WIP */
 	chg->try_sink_active = true;
@@ -4240,6 +4389,7 @@ static int typec_try_sink(struct smb_charger *chg)
 	 * while other side is Rp, wait for VBUS from it; exit if other side
 	 * removes Rp
 	 */
+	count = 0;
 	do {
 		rc = smblib_read(chg, TYPE_C_STATUS_4_REG, &stat);
 		if (rc < 0) {
@@ -4255,6 +4405,13 @@ static int typec_try_sink(struct smb_charger *chg)
 		if (vbus_detected && debounce_done) {
 			exit_mode = ATTACHED_SINK;
 			goto try_sink_exit;
+		}
+
+		/* vbus no-show, the other side in bad state */
+		if (count++ > 2000) {
+			exit_mode = ERR_VBUS_TIMEOUT;
+			pr_err("laochai tmrout\n");
+			goto excep_exit;
 		}
 
 		/*
@@ -4311,25 +4468,54 @@ try_sink_exit:
 	chg->try_sink_active = false;
 
 	return exit_mode;
+
+excep_exit:
+	/*
+	 * Force source mode, hopefully to bring the other side out of
+	 * bad state
+	 */
+	val.intval = POWER_SUPPLY_TYPEC_PR_SOURCE;
+	rc = smblib_set_prop_typec_power_role(chg, &val);
+	if (rc < 0)
+		smblib_err(chg, "Couldn't set UFP mode rc=%d\n", rc);
+
+	/* revert Tccdebounce time back to ~120ms */
+	rc = smblib_masked_write(chg, MISC_CFG_REG, TCC_DEBOUNCE_20MS_BIT, 0);
+	if (rc < 0)
+		smblib_err(chg, "Couldn't set MISC_CFG_REG rc=%d\n", rc);
+
+	/* wait within DRP cycle */
+	msleep(60);
+
+	/* release forcing of SRC/SNK mode */
+	val.intval = POWER_SUPPLY_TYPEC_PR_DUAL;
+	rc = smblib_set_prop_typec_power_role(chg, &val);
+	if (rc < 0)
+		smblib_err(chg, "Couldn't set DFP mode rc=%d\n", rc);
+
+	chg->try_sink_active = false;
+
+	return exit_mode;
 }
 
 static void typec_sink_insertion(struct smb_charger *chg)
 {
 	int exit_mode;
+	int typec_mode;
 
-	/*
-	 * Try.SNK entry status - ATTACHWAIT.SRC state and detected Rd-open
-	 * or RD-Ra for TccDebounce time.
-	 */
+	exit_mode = typec_try_sink(chg);
 
-	if (*chg->try_sink_enabled) {
-		exit_mode = typec_try_sink(chg);
+	if (exit_mode == ERR_VBUS_TIMEOUT)
+		return;
 
-		if (exit_mode != ATTACHED_SRC) {
-			smblib_usb_typec_change(chg);
-			return;
-		}
+	if (exit_mode != ATTACHED_SRC) {
+		smblib_usb_typec_change(chg);
+		return;
 	}
+
+	typec_mode = smblib_get_prop_typec_mode(chg);
+	if (typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER)
+		chg->is_audio_adapter = true;
 
 	/* when a sink is inserted we should not wait on hvdcp timeout to
 	 * enable pd
@@ -4468,6 +4654,12 @@ static void smblib_handle_typec_removal(struct smb_charger *chg)
 	if (rc < 0)
 		smblib_err(chg, "Couldn't set USBIN_ADAPTER_ALLOW_5V_TO_9V rc=%d\n",
 			rc);
+
+	if (chg->is_audio_adapter == true)
+		/* wait for the audio driver to lower its en gpio */
+		msleep(*chg->audio_headset_drp_wait_ms);
+
+	chg->is_audio_adapter = false;
 
 	/* enable DRP */
 	rc = smblib_masked_write(chg, TYPE_C_INTRPT_ENB_SOFTWARE_CTRL_REG,
@@ -6326,8 +6518,11 @@ static void mmi_set_extbat_state(struct smb_charger *chip,
 		vote(chip->dc_suspend_votable, EB_VOTER,
 		     true, 1);
 
-		if (gpio_is_valid(chip->mmi.ebchg_gpio.gpio))
+		if (gpio_is_valid(chip->mmi.ebchg_gpio.gpio)) {
 			gpio_set_value(chip->mmi.ebchg_gpio.gpio, 0);
+			if (chip->single_path_usbin_switch)
+				mmi_set_usb_en_polarity(chip, USB_EN_ACTIVE_LOW);
+		}
 		chip->mmi.cl_ebsrc = 0;
 
 		ret.intval = MICRO_9V;
@@ -6400,6 +6595,15 @@ static void mmi_set_extbat_state(struct smb_charger *chip,
 			vote(chip->dc_suspend_votable, EB_VOTER,
 			     true, 1);
 			gpio_set_value(chip->mmi.ebchg_gpio.gpio, 1);
+			if (chip->single_path_usbin_switch) {
+				int suspend;
+				smblib_get_usb_suspend(chip, &suspend);
+				if (suspend) {
+					pr_info("PMI: %s usb suspend when eb sink, set usb_en pol\n",
+						__func__);
+					mmi_set_usb_en_polarity(chip, USB_EN_ACTIVE_HIGH);
+				}
+			}
 		}
 		break;
 	case EB_SRC:
@@ -6442,6 +6646,8 @@ static void mmi_set_extbat_state(struct smb_charger *chip,
 			vote(chip->dc_suspend_votable, EB_VOTER,
 			     false, 1);
 			gpio_set_value(chip->mmi.ebchg_gpio.gpio, 0);
+			if (chip->single_path_usbin_switch)
+				mmi_set_usb_en_polarity(chip, USB_EN_ACTIVE_LOW);
 
 			ret.intval = MICRO_9V;
 			rc = smblib_set_prop_pd_voltage_max(chip, &ret);
@@ -6459,6 +6665,8 @@ static void mmi_set_extbat_state(struct smb_charger *chip,
 		if (!rc) {
 			chip->mmi.ebchg_state = state;
 			gpio_set_value(chip->mmi.ebchg_gpio.gpio, 0);
+			if (chip->single_path_usbin_switch)
+				mmi_set_usb_en_polarity(chip, USB_EN_ACTIVE_LOW);
 			vote(chip->usb_icl_votable, EB_VOTER,
 			     false, 0);
 			vote(chip->dc_suspend_votable, EB_VOTER,
@@ -6508,7 +6716,10 @@ void mmi_chrg_rate_check(struct smb_charger *chip)
 			else
 				mmi->charger_rate =
 					POWER_SUPPLY_CHARGE_RATE_NORMAL;
-		} else if (is_wls_present(chip))
+		} else if (is_wls_present(chip) &&
+			   mmi->inner_wls_vmax > (MICRO_5V / 1000))
+			mmi->charger_rate = POWER_SUPPLY_CHARGE_RATE_TURBO;
+		else if (is_wls_present(chip))
 			mmi->charger_rate = POWER_SUPPLY_CHARGE_RATE_NORMAL;
 		else
 			mmi->charger_rate = POWER_SUPPLY_CHARGE_RATE_NONE;
@@ -6709,13 +6920,17 @@ static void mmi_heartbeat_work(struct work_struct *work)
 	if (pwr_ext == POWER_SUPPLY_PTP_EXT_SUPPORTED) {
 		mmi->usbeb_present = is_usbeb_present(chip);
 		mmi->wls_present = is_wls_present(chip);
+	} else if (mmi->inner_wls_used) {
+		mmi->usbeb_present = false;
+		mmi->wls_present = is_wls_present(chip);
 	} else {
 		mmi->usbeb_present = false;
 		mmi->wls_present = false;
 	}
 	/* Hold Wakelock if External Battery has External Power */
-	if ((mmi->wls_present || mmi->usbeb_present) &&
-	    (mmi->ebchg_state == EB_SRC))
+	if (((mmi->wls_present || mmi->usbeb_present) &&
+	    (mmi->ebchg_state == EB_SRC)) ||
+	    (mmi->wls_present && mmi->inner_wls_used))
 		vote(chip->awake_votable, WIRELESS_VOTER, true, 0);
 	else
 		vote(chip->awake_votable, WIRELESS_VOTER, false, 0);
@@ -6984,6 +7199,9 @@ static void mmi_heartbeat_work(struct work_struct *work)
 	else
 		target_dc = mmi->dc_ebmax_current_ma;
 
+	if (mmi->inner_wls_used && mmi->wls_psy)
+		target_dc = mmi->inner_wls_imax;
+
 	mmi_find_temp_zone(chip, batt_temp);
 	zone = &mmi->temp_zones[mmi->pres_temp_zone];
 
@@ -7008,7 +7226,9 @@ static void mmi_heartbeat_work(struct work_struct *work)
 	if (mmi->charging_limit_modes == CHARGING_LIMIT_RUN)
 		pr_warn("Factory Mode/Image so Limiting Charging!!!\n");
 
-	if (!charger_present && (mmi->ebchg_state != EB_SRC)) {
+	if (!charger_present &&
+	    (mmi->ebchg_state != EB_SRC) &&
+	    !(mmi->inner_wls_used && mmi->wls_present)) {
 		mmi->pres_chrg_step = STEP_NONE;
 	} else if ((mmi->pres_temp_zone == ZONE_HOT) ||
 		   (mmi->pres_temp_zone == ZONE_COLD) ||
@@ -7513,6 +7733,26 @@ static DEVICE_ATTR(factory_image_mode, 0644,
 		factory_image_mode_show,
 		factory_image_mode_store);
 
+static ssize_t factory_charge_upper_show(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	int state;
+
+	if (!mmi_chip) {
+		pr_err("chip not valid\n");
+		return -ENODEV;
+	}
+
+	state = mmi_chip->mmi.upper_limit_capacity;
+
+	return scnprintf(buf, CHG_SHOW_MAX_SIZE, "%d\n", state);
+}
+
+static DEVICE_ATTR(factory_charge_upper, 0444,
+		factory_charge_upper_show,
+		NULL);
+
 static ssize_t force_demo_mode_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
@@ -7867,6 +8107,63 @@ static DEVICE_ATTR(force_chg_iusb, 0664,
 		force_chg_iusb_show,
 		force_chg_iusb_store);
 
+static ssize_t force_chg_idc_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	unsigned long r;
+	unsigned long dc_curr;
+
+	r = kstrtoul(buf, 0, &dc_curr);
+	if (r) {
+		smblib_err(mmi_chip, "Invalid idc value = %lu\n", dc_curr);
+		return -EINVAL;
+	}
+
+	if (!mmi_chip) {
+		smblib_err(mmi_chip, "chip not valid\n");
+		return -ENODEV;
+	}
+	dc_curr *= 1000; /* Convert to uA */
+	r = smblib_set_charge_param(mmi_chip, &mmi_chip->param.dc_icl, dc_curr);
+	if (r < 0) {
+		smblib_err(mmi_chip,
+			   "Factory Couldn't set dc icl = %d rc=%d\n",
+			   (int)dc_curr, (int)r);
+		return r;
+	}
+
+	return r ? r : count;
+}
+
+static ssize_t force_chg_idc_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	int state;
+	int r;
+
+	if (!mmi_chip) {
+		smblib_err(mmi_chip, "chip not valid\n");
+		r = -ENODEV;
+		goto end;
+	}
+
+	r = smblib_get_charge_param(mmi_chip, &mmi_chip->param.dc_icl, &state);
+	if (r < 0) {
+		smblib_err(mmi_chip,
+			   "Factory Couldn't get dc_icl rc=%d\n", (int)r);
+		return r;
+	}
+	state /= 1000; /* Convert to mA */
+end:
+	return scnprintf(buf, CHG_SHOW_MAX_SIZE, "%d\n", state);
+}
+
+static DEVICE_ATTR(force_chg_idc, 0664,
+		force_chg_idc_show,
+		force_chg_idc_store);
+
 #define PRE_CHARGE_CONV_MV 25
 #define PRE_CHARGE_MAX 0x3F
 static ssize_t force_chg_itrick_store(struct device *dev,
@@ -8024,6 +8321,7 @@ static void parse_mmi_dt_gpio(struct smb_charger *chg)
 	chg->mmi.ebchg_gpio.gpio = -EINVAL;
 	chg->mmi.warn_gpio.gpio = -EINVAL;
 	chg->mmi.togl_rst_gpio.gpio = -EINVAL;
+	chg->mmi.wls_otg_gpio.gpio = -EINVAL;
 
 	if (!node) {
 		smblib_err(chg, "gpio dtree info. missing\n");
@@ -8032,6 +8330,54 @@ static void parse_mmi_dt_gpio(struct smb_charger *chg)
 
 	if (of_gpio_count(node) < 0) {
 		smblib_err(chg, "No GPIOS defined.\n");
+		return;
+	}
+
+	if (chg->mmi.inner_wls_used) {
+		chg->mmi.wls_otg_pinctrl =
+			pinctrl_get_select(chg->dev, "wls_otg_dis");
+		if (!chg->mmi.wls_otg_pinctrl) {
+			smblib_err(chg, "Couldn't set pinctrl wls_otg_dis\n");
+			return;
+		}
+
+		chg->mmi.wls_otg_gpio.gpio = of_get_gpio_flags(node, 0, &flags);
+		chg->mmi.wls_otg_gpio.flags = flags;
+		of_property_read_string_index(node, "gpio-names", 0,
+					      &chg->mmi.wls_otg_gpio.label);
+
+		if (!gpio_is_valid(chg->mmi.wls_otg_gpio.gpio)) {
+			dev_err(chg->dev, "get gpio wls otg error rc=%d\n",
+						chg->mmi.wls_otg_gpio.gpio);
+			return;
+		}
+
+		rc = gpio_request_one(chg->mmi.wls_otg_gpio.gpio,
+				      chg->mmi.wls_otg_gpio.flags,
+				      chg->mmi.wls_otg_gpio.label);
+		if (rc) {
+			smblib_err(chg, "failed to request wls otg GPIO\n");
+			return;
+		}
+
+		rc = gpio_export(chg->mmi.wls_otg_gpio.gpio, 1);
+		if (rc) {
+			smblib_err(chg,
+				   "Failed to export wls otg GPIO %s: %d\n",
+				   chg->mmi.wls_otg_gpio.label,
+				   chg->mmi.wls_otg_gpio.gpio);
+			return;
+		}
+
+		rc = gpio_export_link(chg->dev, chg->mmi.wls_otg_gpio.label,
+				      chg->mmi.wls_otg_gpio.gpio);
+		if (rc) {
+			smblib_err(chg,
+				   "Failed to wls otg gpio link GPIO %s: %d\n",
+				   chg->mmi.wls_otg_gpio.label,
+				   chg->mmi.wls_otg_gpio.gpio);
+			return;
+		}
 		return;
 	}
 
@@ -8283,6 +8629,16 @@ static int parse_mmi_dt(struct smb_charger *chg)
 		chg->mmi.vfloat_comp_mv = 0;
 	chg->mmi.vfloat_comp_mv /= 1000;
 
+	chg->single_path_usbin_switch =
+		of_property_read_bool(node, "qcom,use-single-path-usbin-switch");
+
+	rc = of_property_read_string_index(chg->dev->of_node,
+					"qcom,inner-wls-name", 0,
+					&chg->mmi.inner_wls_name);
+	if (rc < 0)
+		chg->mmi.inner_wls_name = "idt_wireless";
+	chg->mmi.inner_wls_used = of_property_read_bool(node,
+					"qcom,inner-wls-used");
 	return rc;
 }
 
@@ -8386,6 +8742,11 @@ void mmi_init(struct smb_charger *chg)
 	if (rc)
 		smblib_err(chg, "couldn't create factory_image_mode\n");
 
+	rc = device_create_file(chg->dev,
+				&dev_attr_factory_charge_upper);
+	if (rc)
+		smblib_err(chg, "couldn't create factory_charge_upper\n");
+
 	if (chg->mmi.factory_mode) {
 		mmi_chip = chg;
 		smblib_err(chg, "Entering Factory Mode SMB!\n");
@@ -8421,6 +8782,12 @@ void mmi_init(struct smb_charger *chg)
 					&dev_attr_force_chg_iusb);
 		if (rc) {
 			smblib_err(chg, "couldn't create force_chg_iusb\n");
+		}
+
+		rc = device_create_file(chg->dev,
+					&dev_attr_force_chg_idc);
+		if (rc) {
+			smblib_err(chg, "couldn't create force_chg_idc\n");
 		}
 
 		rc = device_create_file(chg->dev,
@@ -8483,6 +8850,8 @@ void mmi_deinit(struct smb_charger *chg)
 				   &dev_attr_force_chg_ibatt);
 		device_remove_file(chg->dev,
 				   &dev_attr_force_chg_iusb);
+		device_remove_file(chg->dev,
+				   &dev_attr_force_chg_idc);
 		device_remove_file(chg->dev,
 				   &dev_attr_force_chg_itrick);
 	}

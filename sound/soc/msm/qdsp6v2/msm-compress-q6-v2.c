@@ -1855,12 +1855,12 @@ static int msm_compr_playback_free(struct snd_compr_stream *cstream)
 	q6asm_audio_client_free(ac);
 	msm_adsp_clean_mixer_ctl_pp_event_queue(soc_prtd);
 	if (pdata->audio_effects[soc_prtd->dai_link->be_id] != NULL) {
-		kfree(pdata->audio_effects[soc_prtd->dai_link->be_id]);
-		pdata->audio_effects[soc_prtd->dai_link->be_id] = NULL;
+	kfree(pdata->audio_effects[soc_prtd->dai_link->be_id]);
+	pdata->audio_effects[soc_prtd->dai_link->be_id] = NULL;
 	}
 	if (pdata->dec_params[soc_prtd->dai_link->be_id] != NULL) {
-		kfree(pdata->dec_params[soc_prtd->dai_link->be_id]);
-		pdata->dec_params[soc_prtd->dai_link->be_id] = NULL;
+	kfree(pdata->dec_params[soc_prtd->dai_link->be_id]);
+	pdata->dec_params[soc_prtd->dai_link->be_id] = NULL;
 	}
 	pdata->is_in_use[soc_prtd->dai_link->be_id] = false;
 	kfree(prtd);

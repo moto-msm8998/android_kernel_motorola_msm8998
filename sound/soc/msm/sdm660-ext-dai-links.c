@@ -22,6 +22,10 @@
 #include "sdm660-common.h"
 #include "sdm660-external.h"
 
+#ifdef CONFIG_MODS_USE_EXTCODEC_MI2S
+#include <linux/mods/modbus_ext.h>
+#endif
+
 #define DEV_NAME_STR_LEN            32
 #define __CHIPSET__ "SDM660 "
 #define MSM_DAILINK_NAME(name) (__CHIPSET__#name)
@@ -584,6 +588,32 @@ static const struct snd_soc_pcm_stream cs35l35_pdm_params = {
 };
 #endif
 
+#ifdef CONFIG_MODS_USE_EXTCODEC_MI2S
+static void cs47l90_aif2_enable(bool enable)
+{
+	struct modbus_ext_status modbus_status;
+	modbus_status.proto = MODBUS_PROTO_I2S;
+	modbus_status.active = enable;
+	modbus_ext_set_state(&modbus_status);
+}
+
+static int cs47l90_aif2_snd_startup(struct snd_pcm_substream *substream)
+{
+	cs47l90_aif2_enable(true);
+	return 0;
+}
+
+static void cs47l90_aif2_snd_shutdown(struct snd_pcm_substream *substream)
+{
+	cs47l90_aif2_enable(false);
+}
+
+static struct snd_soc_ops cs47l90_aif2_mods_be_ops = {
+	.startup = cs47l90_aif2_snd_startup,
+	.shutdown = cs47l90_aif2_snd_shutdown,
+};
+#endif
+
 static struct snd_soc_dai_link msm_ext_madera_be_dai[] = {
 	/* Backend DAI Links */
 	{
@@ -823,6 +853,23 @@ static struct snd_soc_dai_link msm_ext_madera_be_dai[] = {
 		.ignore_suspend = 1,
 		.params = &cs35l35_pdm_params,
 	}
+#elif defined(CONFIG_SND_SOC_CS47L35) && defined(CONFIG_SND_SOC_CS35L36)
+	{ /* codec to amp link */
+		.name = "MADERA-AMP",
+		.stream_name = "MADERA-AMP Playback",
+		.cpu_name = "cs47l35-codec",
+		.cpu_dai_name = "cs47l35-aif1",
+		.codec_name = "cs35l36.2-0040",
+		.codec_dai_name = "cs35l36-pcm",
+		.init = cs35l35_dai_init,
+		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+			SND_SOC_DAIFMT_CBS_CFS,
+		.no_pcm = 1,
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+		.params = &cs35l35_params,
+	},
+
 #else
 	{ /* codec to amp link */
 		.name = "MADERA-AMP",
@@ -838,7 +885,23 @@ static struct snd_soc_dai_link msm_ext_madera_be_dai[] = {
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
 		.params = &cs35l35_params,
+	},
+#ifdef CONFIG_MODS_USE_EXTCODEC_MI2S
+	{ /* codec to mods */
+		.name = "MADERA-MODS",
+		.stream_name = "MADERA-MODS Audio",
+		.platform_name = "cs47l90-codec",
+		.cpu_dai_name = "cs47l90-aif2",
+		.codec_name = "mods_codec_shim",
+		.codec_dai_name = "mods_codec_shim_dai",
+		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+			SND_SOC_DAIFMT_CBS_CFS,
+		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+		.ops = &cs47l90_aif2_mods_be_ops,
 	}
+#endif
 #endif
 };
 

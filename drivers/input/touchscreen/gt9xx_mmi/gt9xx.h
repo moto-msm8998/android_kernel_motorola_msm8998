@@ -73,10 +73,18 @@ struct config_modifier {
 	const char *name;
 	int id;
 	bool effective;
+	struct goodix_clip_area *clipa;
 	struct list_head link;
 };
 
+struct goodix_exp_fn_ctrl {
+	struct delayed_work det_work;
+	struct workqueue_struct *det_workqueue;
+	struct goodix_ts_data *goodix_ts_data_ptr;
+};
+
 struct goodix_ts_platform_data {
+	const char *name;
 	int irq_gpio;
 	int rst_gpio;
 	u32 rst_gpio_flags;
@@ -155,6 +163,11 @@ struct goodix_ts_data {
 	bool patching_enabled;
 	bool charger_detection_enabled;
 	struct work_struct ps_notify_work;
+	bool fps_detection_enabled;
+	bool is_fps_registered;
+	struct notifier_block fps_notif;
+	bool clipping_on;
+	struct goodix_clip_area *clipa;
 };
 
 extern u16 show_len;
@@ -241,8 +254,8 @@ extern u16 total_len;
 	#define GTP_MAX_WIDTH    480
 	#define GTP_INT_TRIGGER  0            /* 0: Rising 1: Falling */
 #else
-	#define GTP_MAX_HEIGHT   4096
-	#define GTP_MAX_WIDTH    4096
+	#define GTP_MAX_HEIGHT   2159
+	#define GTP_MAX_WIDTH    1079
 	#define GTP_INT_TRIGGER  1
 #endif
 #define GTP_MAX_TOUCH         10

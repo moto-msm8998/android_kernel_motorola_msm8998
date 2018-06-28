@@ -1,0 +1,300 @@
+/* Copyright (c) 2016, Motorola Mobility Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+#include "sdm636-moto-common.dtsi"
+#include "dsi-panel-mot-lg-550-1080p-vid.dtsi"
+#include "sdm636-camera-sensor-mot-heart.dtsi"
+#include "dsi-panel-mot-tianma-520-1080p-vid.dtsi"
+#include "dsi-panel-mot-boe-520-1080p-vid.dtsi"
+#include "dsi-panel-mot-dummy-qhd-video.dtsi"
+#include "sdm660-external-codec.dtsi"
+#include "sdm636-heart-audio.dtsi"
+#include "sdm636-heart-pinctrl.dtsi"
+#include "sdm636-heart-fps.dtsi"
+
+/ {
+	model = "heart";
+	compatible = "qcom,sdm636-heart", "qcom,sdm636-moto", "qcom,sdm636";
+};
+
+&firmware {
+	android {
+		fstab {
+			vendor {
+				fsmgr_flags = "wait,slotselect,verify";
+			};
+		};
+	};
+};
+
+&soc{
+	qcom,tz_gpio {
+		compatible = "qcom,tz_gpio";
+		tlmm-tz = <0>,
+			<1>,
+			<2>,
+			<3>;
+	};
+
+	ssphy: ssphy@c010000 {
+		status = "disabled";
+	};
+
+	usb_nop_phy: usb_nop_phy {
+		compatible = "usb-nop-xceiv";
+	};
+};
+
+&usb3 {
+	dwc3@a800000 {
+		usb-phy = <&qusb_phy0>, <&usb_nop_phy>;
+		maximum-speed = "high-speed";
+	};
+};
+
+&mdss_mdp {
+	qcom,mdss-pref-prim-intf = "dsi";
+};
+
+&mdss_dsi {
+	hw-config = "single_dsi";
+};
+
+&mdss_dsi0 {
+	qcom,dsi-pref-prim-pan = <&mot_lg_550_1080p_vid_v0>;
+	pinctrl-names = "mdss_default", "mdss_sleep";
+	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
+	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
+	qcom,platform-reset-gpio = <&tlmm 53 0>;
+	qcom,platform-te-gpio = <&tlmm 59 0>;
+};
+
+&pm660l_wled {
+	qcom,ovp-mv = <18100>;
+	qcom,led-strings-list = [00 01 02];
+	qcom,en-cabc;
+};
+
+&mdss_dp_ctrl{
+		status = "disabled";
+};
+
+&i2c_3 {
+	status = "okay";
+	sw49106@28 {
+#include <dt-bindings/gpio/gpio.h>
+		compatible = "siw,sw49106";
+		reg = <0x28>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <67 0x02>;
+		irqflags = <0x2002>;
+
+		chip_flags = <0x1000>;
+
+		reset-gpio = <&tlmm 66 GPIO_ACTIVE_LOW>;
+		irq-gpio = <&tlmm 67 GPIO_ACTIVE_LOW>;
+
+		max_x = <1080>;
+		max_y = <2252>;
+		max_presure = <0xff>;
+		max_width = <15>;
+		max_orientation = <1>;
+		max_id = <10>;
+
+		hw_reset_delay = <210>;
+		sw_reset_delay = <90>;
+		use_lpwg = <1>;
+		use_lpwg_test = <1>;
+
+		use_firmware = <0>;
+		use_fw_upgrade = <1>;
+	};
+};
+
+&pm660l_gpios {
+	gpio@c600 {
+		qcom,vin-sel = <1>;
+	};
+};
+
+&i2c_2 { /* cypress capsensor */
+	status = "okay";
+	/delete-node/ smb1351-charger@1d;
+	cypress_capsensor@1D {
+		compatible = "cypress,sf3155";
+		label = "MotorolaCapSense";
+		reg = <0x1D>;
+		vdd-supply = <&pm660_l13>;
+		vddio-supply = <&pm660_l13>;
+		avdd-supply = <&pm660_l13>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <75 0x2008>;
+		silicon_id = <0x0BB11477>;
+		block_size = <64>;
+		num_of_blocks = <256>;
+		secure_bytes = <32>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cypress_reset_default &cypress_irq_default>;
+		gpios = <&tlmm 20 0>, /* RESET */
+			<&tlmm 8 0>, /* programming SCLK */
+			<&tlmm 9 0>, /* programming SDAT */
+			<&tlmm 75 0x2008>;
+		use-raw-gpio-rw = <1>;
+		gpio_base_addr = <0x03000004>;
+		gpio_base_size = <0x00a00000>;
+		gpio_clk_group = <0x00900000>;
+		gpio_dat_group = <0x00900000>;
+		cyttsp,sar-status-reg = <0x50>;
+		cyttsp,standby-reg = <0x51>;
+		cyttsp,bootloader-addr = <0x02>;
+		cyttsp,key-num = <4>;
+		cyttsp,key-codes = <4>;
+	};
+};
+
+&i2c_6 { /* BLSP1 QUP6 (NFC) */
+	status = "okay";
+	nq@28 {
+		compatible = "qcom,nq-nci";
+		reg = <0x28>;
+		qcom,nq-irq = <&tlmm 28 0x00>;
+		qcom,nq-ven = <&tlmm 29 0x00>;
+		qcom,nq-firm = <&tlmm 30 0x00>;
+		qcom,nq-clkreq = <&pm660_gpios 4 0x00>;
+		qcom,nq-esepwr = <&tlmm 31 0x00>;
+		interrupt-parent = <&tlmm>;
+		qcom,clk-src = "BBCLK3";
+		interrupts = <28 0>;
+		interrupt-names = "nfc_irq";
+		pinctrl-names = "nfc_active", "nfc_suspend";
+		pinctrl-0 = <&nfc_int_active &nfc_enable_active>;
+		pinctrl-1 = <&nfc_int_suspend &nfc_enable_suspend>;
+		clocks = <&clock_rpmcc RPM_LN_BB_CLK3_PIN>;
+		clock-names = "ref_clk";
+	};
+};
+
+&red_led {
+	linux,name = "charging";
+	/delete-property/ linux,default-trigger;
+	qcom,ramp-step-ms = <100>;
+	qcom,idx-len = <42>;
+	qcom,duty-pcts =
+		[00 05 0a 0f 14 19 1e 23 28 2d 32 37 3c 41 46 4b 50 55 5a 5f 64
+		64 5f 5a 55 50 4b 46 41 3c 37 32 2d 28 23 1e 19 14 0f 0a 05 00];
+};
+
+/delete-node/ &green_led;
+/delete-node/ &blue_led;
+
+&pm660_haptics { /* Vibrator */
+	qcom,actuator-type = "lra";
+	qcom,vmax-mv = <3000>;
+	qcom,ilim-ma = <90>;
+	qcom,wave-play-rate-us = <5420>;
+	qcom,brake-pattern = [03 03 00 00];
+	qcom,play-mode = "direct";
+	qcom,wave-shape = "sine";
+	qcom,lra-auto-res-mode="none";
+
+	qcom,lra-high-z="none";
+	qcom,lra-res-cal-period = <4>;
+	qcom,correct-lra-drive-freq;
+	qcom,misc-trim-error-rc19p2-clk-reg-present;
+};
+
+&tlmm {
+	p922x_irq_enable: p922x_irq_enable {
+		mux {
+			pins = "gpio40";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio40";
+			drive-strength = <2>;
+			bias-disable;
+		};
+	};
+
+	wls_otg_dis: wls_otg_dis {
+		mux {
+			pins = "gpio61";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio61";
+			drive-strength = <2>;
+			output-low;
+			bias-disable;
+		};
+	};
+
+	wls_otg_en: wls_otg_en {
+		mux {
+			pins = "gpio61";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio61";
+			drive-strength = <2>;
+			output-high;
+			bias-disable;
+		};
+	};
+};
+
+&i2c_4 {
+	status = "okay";
+	p922x_wls_i2c@61 {
+		compatible = "idt,p922x-charger";
+		reg = <0x61>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <40 0x1>;
+		gpios = <&tlmm 40 0x1>; /* IRQ */
+		gpio-names = "idt_p922x_irq";
+		vdd-i2c-supply = <&pm660_l13>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&p922x_irq_enable>;
+
+		idt,tx-auth-enabled;
+		idt,chg-efficiency = <70>;
+		idt,chg-limit-soc = <95>;
+		idt,chg-idle-cl = <50>;
+	};
+};
+
+&pm660_charger {
+	qcom,inner-wls-name = "idt_wireless";
+	qcom,inner-wls-used;
+	qcom,dc-icl-ua = <1100000>;
+	gpios = <&tlmm 61 0x1>; /* OTG EN*/
+	gpio-names = "wls_otg_en";
+	pinctrl-names = "wls_otg_en","wls_otg_dis";
+	pinctrl-0 = <&wls_otg_en>;
+	pinctrl-1 = <&wls_otg_dis>;
+
+	io-channels = <&pm660_rradc 8>,
+		      <&pm660_rradc 10>,
+		      <&pm660_rradc 3>,
+		      <&pm660_rradc 4>,
+		      <&pm660_rradc 5>,
+		      <&pm660_rradc 6>;
+	io-channel-names = "charger_temp",
+			   "charger_temp_max",
+			   "usbin_i",
+			   "usbin_v",
+			   "dcin_i",
+			   "dcin_v";
+};

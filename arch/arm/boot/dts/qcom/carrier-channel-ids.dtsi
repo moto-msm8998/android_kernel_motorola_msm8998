@@ -56,7 +56,7 @@
 		"openla",	/* 39 */
 		"opencl",	/* 40 */
 		"openmx",	/* 41 */
-		"undefined",	/* 42 */
+		"altmx",	/* 42 */
 		"undefined",	/* 43 */
 		"undefined",	/* 44 */
 		"undefined",	/* 45 */
@@ -118,8 +118,8 @@
 		"pluspl",	/* 101 */
 		"dtpl",		/* 102 */
 		"tefes",	/* 103 */
-		"alteu",	/* 104 */
-		"undefined",	/* 105 */
+		"altice",	/* 104 */
+		"vipeu",	/* 105 */
 		"undefined",	/* 106 */
 		"undefined",	/* 107 */
 		"undefined",	/* 108 */
@@ -164,7 +164,7 @@
 		"amz",		/* 147 */
 		"acg",		/* 148 */
 		"lra",		/* 149 */
-		"undefined",	/* 150 */
+		"comcast",	/* 150 */
 		"undefined",	/* 151 */
 		"undefined",	/* 152 */
 		"undefined",	/* 153 */
@@ -222,9 +222,9 @@
 		"retth",	/* 205 */
 		"retru",	/* 206 */
 		"trueth",	/* 207 */
-		"undefined",	/* 208 */
-		"undefined",	/* 209 */
-		"undefined",	/* 210 */
+		"smarthk",	/* 208 */
+		"mobilpk",	/* 209 */
+		"retsea",	/* 210 */
 		"undefined",	/* 211 */
 		"undefined",	/* 212 */
 		"undefined",	/* 213 */

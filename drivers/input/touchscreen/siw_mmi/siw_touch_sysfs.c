@@ -270,7 +270,7 @@ static ssize_t _store_lpwg_data(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int reply = 0;
 
-	if (kstrtoint(buf, 10, &reply) <= 0) {
+	if (kstrtoint(buf, 10, &reply) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -361,7 +361,7 @@ static ssize_t _store_mfts_state(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int value = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -392,7 +392,7 @@ static ssize_t _store_mfts_lpwg(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int value = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -426,7 +426,7 @@ static ssize_t _store_lockscreen_state(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int value = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -464,7 +464,7 @@ static ssize_t _store_ime_state(struct device *dev,
 	int value = 0;
 	int ret = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		goto out;
 	}
@@ -514,7 +514,7 @@ static ssize_t _store_quick_cover_state(struct device *dev,
 	int value = 0;
 	struct siw_ts *ts = to_touch_core(dev);
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -556,7 +556,7 @@ static ssize_t _store_sp_link_touch_off(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int value = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -598,7 +598,7 @@ static ssize_t _store_irq_state(struct device *dev,
 	struct siw_ts *ts = chip->ts;
 	int value = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -646,7 +646,7 @@ static ssize_t _store_debug_tool_state(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int data = 0;
 
-	if (kstrtoint(buf, 10, &data) <= 0) {
+	if (kstrtoint(buf, 10, &data) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -690,7 +690,7 @@ static ssize_t _store_debug_option_state(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int new_mask = 0;
 
-	if (kstrtoint(buf, 10, &new_mask) <= 0) {
+	if (kstrtoint(buf, 10, &new_mask) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -729,7 +729,7 @@ static ssize_t _store_incoming_call_state(struct device *dev,
 	int value = 0;
 	int ret = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -833,7 +833,7 @@ static ssize_t _store_onhand(struct device *dev,
 	struct siw_ts *ts = to_touch_core(dev);
 	int value = 0;
 
-	if (kstrtoint(buf, 10, &value) <= 0) {
+	if (kstrtoint(buf, 10, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -1028,7 +1028,7 @@ static ssize_t _store_init_late(struct device *dev,
 {
 	int value = 0;
 
-	if (kstrtoint(buf, 16, &value) <= 0) {
+	if (kstrtoint(buf, 16, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -1104,7 +1104,7 @@ static ssize_t _store_dbg_mon(struct device *dev,
 		return count;
 	}
 
-	if (kstrtoint(buf, 10, &pause) <= 0) {
+	if (kstrtoint(buf, 10, &pause) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return count;
 	}
@@ -1178,7 +1178,7 @@ static ssize_t __store_g_state(struct device *dev,
 {
 	int value = 0;
 
-	if (kstrtoint(buf, 16, &value) <= 0) {
+	if (kstrtoint(buf, 16, &value) < 0) {
 		siw_sysfs_err_invalid_param(dev);
 		return -EINVAL;
 	}
@@ -1610,6 +1610,108 @@ static void siw_touch_do_del_sysfs(struct siw_ts *ts)
 	siw_touch_del_sysfs_normal(ts);
 }
 
+#include <linux/major.h>
+#include <linux/kdev_t.h>
+/* Attribute: path (RO) */
+static ssize_t path_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct siw_ts *ts = to_touch_core(dev);
+	ssize_t blen;
+	const char *path;
+
+	if (!ts) {
+		pr_err("cannot get siw_ts pointer\n");
+		return (ssize_t)0;
+	}
+	path = kobject_get_path(&ts->kobj, GFP_KERNEL);
+	blen = scnprintf(buf, PAGE_SIZE, "%s", path ? path : "na");
+	kfree(path);
+	return blen;
+}
+
+/* Attribute: vendor (RO) */
+static ssize_t vendor_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "siw");
+}
+
+static struct device_attribute touchscreen_attributes[] = {
+	__ATTR_RO(path),
+	__ATTR_RO(vendor),
+	__ATTR_NULL
+};
+
+#define TSDEV_MINOR_BASE 128
+#define TSDEV_MINOR_MAX 32
+
+static int siw_ts_sysfs_class(void *_data, bool create)
+{
+	struct siw_ts *ts = _data;
+	struct siw_touch_pdata *pdata = ts->pdata;
+	struct device_attribute *attrs = touchscreen_attributes;
+	int i, error = 0;
+	static struct class *touchscreen_class;
+	static struct device *ts_class_dev;
+	static int minor;
+
+	if (create) {
+		minor = input_get_new_minor(ts->addr, 1, false);
+		if (minor < 0)
+			minor = input_get_new_minor(TSDEV_MINOR_BASE,
+					TSDEV_MINOR_MAX, true);
+		pr_info("assigned minor %d\n", minor);
+
+		touchscreen_class = class_create(THIS_MODULE, "touchscreen");
+		if (IS_ERR(touchscreen_class)) {
+			error = PTR_ERR(touchscreen_class);
+			touchscreen_class = NULL;
+			return error;
+		}
+
+		ts_class_dev = device_create(touchscreen_class, NULL,
+				MKDEV(INPUT_MAJOR, minor),
+				ts, pdata->chip_name);
+		if (IS_ERR(ts_class_dev)) {
+			error = PTR_ERR(ts_class_dev);
+			ts_class_dev = NULL;
+			return error;
+		}
+
+		for (i = 0; attrs[i].attr.name != NULL; ++i) {
+			error = device_create_file(ts_class_dev, &attrs[i]);
+			if (error)
+				break;
+		}
+
+		if (error)
+			goto device_destroy;
+	} else {
+		if (!touchscreen_class || !ts_class_dev)
+			return -ENODEV;
+
+		for (i = 0; attrs[i].attr.name != NULL; ++i)
+			device_remove_file(ts_class_dev, &attrs[i]);
+
+		device_unregister(ts_class_dev);
+		class_unregister(touchscreen_class);
+	}
+
+	return 0;
+
+device_destroy:
+	for (--i; i >= 0; --i)
+		device_remove_file(ts_class_dev, &attrs[i]);
+	device_destroy(touchscreen_class, MKDEV(INPUT_MAJOR, minor));
+	ts_class_dev = NULL;
+	class_unregister(touchscreen_class);
+	pr_err("error creating touchscreen class\n");
+
+	return -ENODEV;
+}
+
+
 int siw_touch_add_sysfs(struct siw_ts *ts)
 {
 	struct device *dev = ts->dev;
@@ -1622,13 +1724,24 @@ int siw_touch_add_sysfs(struct siw_ts *ts)
 		return -EINVAL;
 	}
 
-	ret = siw_touch_do_add_sysfs(ts);
-	if (ret < 0)
+	ret = siw_ts_sysfs_class(ts, true);
+	if (ret) {
+		t_dev_err(dev, "sys class files creation failed\n");
 		return ret;
+	}
+
+	ret = siw_touch_do_add_sysfs(ts);
+	if (ret < 0) {
+		t_dev_err(dev, "siw sysfs files creation failed\n");
+		goto FREE_SYSFS_CLASS;
+	}
 
 	siw_touch_misc_init(dev);
-
 	return 0;
+
+FREE_SYSFS_CLASS:
+	siw_ts_sysfs_class(ts, false);
+	return ret;
 }
 
 void siw_touch_del_sysfs(struct siw_ts *ts)
@@ -1645,6 +1758,7 @@ void siw_touch_del_sysfs(struct siw_ts *ts)
 	siw_touch_misc_free(dev);
 
 	siw_touch_do_del_sysfs(ts);
+	siw_ts_sysfs_class(ts, false);
 }
 
 
