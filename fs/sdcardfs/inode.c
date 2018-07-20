@@ -321,7 +321,7 @@ static int sdcardfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 		((pd->perm == PERM_ANDROID)
 				&& (qstr_case_eq(&dentry->d_name, &q_data)))) {
 		revert_fsids(saved_cred);
-		saved_cred = override_fsids(SDCARDFS_SB(dir->i_sb),
+		saved_cred = override_fsids(sbi,
 					SDCARDFS_I(d_inode(dentry))->data);
 		if (!saved_cred) {
 			pr_err("sdcardfs: failed to set up .nomedia in %s: %d\n",
@@ -335,7 +335,6 @@ static int sdcardfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode
 			pr_err("sdcardfs: failed to create .nomedia in %s: %d\n",
 						lower_path.dentry->d_name.name,
 						touch_err);
-
 			goto out;
 		}
 	}
@@ -1016,8 +1015,6 @@ const struct inode_operations sdcardfs_dir_iops = {
 	.setattr	= sdcardfs_setattr_wrn,
 	.setattr2	= sdcardfs_setattr,
 	.getattr	= sdcardfs_getattr,
-	.setxattr	= sdcardfs_setxattr,
-	.getxattr	= sdcardfs_getxattr,
 };
 
 const struct inode_operations sdcardfs_main_iops = {
