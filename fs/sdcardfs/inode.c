@@ -22,6 +22,7 @@
 #include <linux/fs_struct.h>
 #include <linux/ratelimit.h>
 #include <linux/xattr.h>
+#include <linux/sched.h>
 
 const struct cred *override_fsids(struct sdcardfs_sb_info *sbi,
 		struct sdcardfs_inode_data *data)
@@ -346,6 +347,7 @@ out:
 	task_lock(current);
 	current->fs = saved_fs;
 	task_unlock(current);
+
 	free_fs_struct(copied_fs);
 out_unlock:
 	sdcardfs_put_lower_path(dentry, &lower_path);
