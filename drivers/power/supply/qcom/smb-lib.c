@@ -2182,6 +2182,32 @@ int smblib_get_prop_input_current_limited(struct smb_charger *chg,
 	return 0;
 }
 
+int smblib_get_prop_batt_current_now(struct smb_charger *chg,
+				     union power_supply_propval *val)
+{
+	int rc;
+
+	if (!chg->bms_psy)
+		return -EINVAL;
+
+	rc = power_supply_get_property(chg->bms_psy,
+				       POWER_SUPPLY_PROP_CURRENT_NOW, val);
+	return rc;
+}
+
+int smblib_get_prop_batt_temp(struct smb_charger *chg,
+			      union power_supply_propval *val)
+{
+	int rc;
+
+	if (!chg->bms_psy)
+		return -EINVAL;
+
+	rc = power_supply_get_property(chg->bms_psy,
+				       POWER_SUPPLY_PROP_TEMP, val);
+	return rc;
+}
+
 int smblib_get_prop_batt_charge_done(struct smb_charger *chg,
 					union power_supply_propval *val)
 {
@@ -7055,13 +7081,6 @@ static void mmi_heartbeat_work(struct work_struct *work)
 		smblib_enable_dc_aicl(chip, false);
 	else if (mmi->usbeb_present && !prev_usbeb_pres)
 		smblib_enable_dc_aicl(chip, true);
-
-	rc = smblib_get_prop_batt_voltage_now(chip, &val);
-	if (rc < 0) {
-		smblib_err(chip, "Error getting Batt Voltage rc = %d\n", rc);
-		goto end_hb;
-	} else
-		batt_mv = val.intval / 1000;
 
 	rc = smblib_get_prop_batt_current_now(chip, &val);
 	if (rc < 0) {
