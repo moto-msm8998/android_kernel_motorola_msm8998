@@ -314,17 +314,12 @@ static void msm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
 		if (msm_is_mode_seamless(&crtc->state->mode))
 			continue;
 
-		funcs = crtc->helper_private;
+		if (drm_crtc_vblank_get(crtc))
+			continue;
 
-		if (crtc->state->enable) {
-			DRM_DEBUG_ATOMIC("enabling [CRTC:%d]\n",
-					 crtc->base.id);
+		kms->funcs->wait_for_crtc_commit_done(kms, crtc);
 
-			if (funcs->enable)
-				funcs->enable(crtc);
-			else
-				funcs->commit(crtc);
-		}
+		drm_crtc_vblank_put(crtc);
 	}
 
 	/* ensure bridge/encoder updates happen on same vblank */
