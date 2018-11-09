@@ -39,6 +39,3 @@ obj-$(CONFIG_SND_SOC_INT_CODEC) += snd-soc-int-codec.o
 snd-soc-ext-codec-objs := sdm660-external.o sdm660-ext-dai-links.o
 obj-$(CONFIG_SND_SOC_EXT_CODEC) += snd-soc-sdm660-common.o
 obj-$(CONFIG_SND_SOC_EXT_CODEC) += snd-soc-ext-codec.o
-
-# for tas2560 dsp algo controls
-obj-$(CONFIG_SND_SOC_TAS2560) += tas2560-algo.o
