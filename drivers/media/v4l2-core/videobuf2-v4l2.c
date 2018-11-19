@@ -133,6 +133,22 @@ static int __set_timestamp(struct vb2_buffer *vb, const void *pb)
 	return 0;
 };
 
+static void vb2_warn_zero_bytesused(struct vb2_buffer *vb)
+{
+	static bool check_once;
+
+	if (check_once)
+		return;
+
+	check_once = true;
+
+	pr_warn("use of bytesused == 0 is deprecated and will be removed in the future,\n");
+	if (vb->vb2_queue->allow_zero_bytesused)
+		pr_warn("use VIDIOC_DECODER_CMD(V4L2_DEC_CMD_STOP) instead.\n");
+	else
+		pr_warn("use the actual size instead.\n");
+}
+
 static int vb2_queue_or_prepare_buf(struct vb2_queue *q, struct v4l2_buffer *b,
 				    const char *opname)
 {
