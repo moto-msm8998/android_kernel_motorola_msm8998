@@ -1166,13 +1166,21 @@ static int to_kernel_prio(int policy, int user_priority)
 		return MAX_USER_RT_PRIO - 1 - user_priority;
 }
 
-static void binder_do_set_priority(struct task_struct *task,
-				   struct binder_priority desired,
-				   bool verify)
-{
-	int priority; /* user-space prio value */
-	bool has_cap_nice;
-	unsigned int policy = desired.sched_policy;
+	if (mm) {
+		down_write(&mm->mmap_sem);
+		if (!mmget_still_valid(mm)) {
+			if (allocate == 0)
+				goto free_range;
+			goto err_no_vma;
+		}
+
+		vma = proc->vma;
+		if (vma && mm != proc->vma_vm_mm) {
+			pr_err("%d: vma mm and task mm mismatch\n",
+				proc->pid);
+			vma = NULL;
+		}
+	}
 
 	if (task->policy == policy && task->normal_prio == desired.prio)
 		return;
