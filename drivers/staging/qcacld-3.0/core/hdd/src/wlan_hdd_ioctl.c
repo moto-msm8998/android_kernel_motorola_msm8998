@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -853,9 +853,20 @@ int hdd_reassoc(hdd_adapter_t *adapter, const uint8_t *bssid,
 
 	pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
 
-	/* if not associated, no need to proceed with reassoc */
-	if (eConnectionState_Associated != pHddStaCtx->conn_info.connState) {
+	/*
+	 * pHddStaCtx->conn_info.connState is set to disconnected only
+	 * after the disconnect done indication from SME. If the SME is
+	 * in the process of disconnecting, the SME Connection state is
+	 * set to disconnected and the pHddStaCtx->conn_info.connState
+	 * will still be associated till the disconnect is done.
+	 * So check both the HDD state and SME state here.
+	 * If not associated, no need to proceed with reassoc
+	 */
+	if ((eConnectionState_Associated != pHddStaCtx->conn_info.connState) ||
+	    (!sme_is_conn_state_connected(WLAN_HDD_GET_HAL_CTX(adapter),
+	    adapter->sessionId))) {
 		hdd_warn("Not associated");
+		hdd_debug("HDD Con state %d", pHddStaCtx->conn_info.connState);
 		ret = -EINVAL;
 		goto exit;
 	}
@@ -5395,9 +5406,10 @@ static int drv_cmd_get_ibss_peer_info(hdd_adapter_t *adapter,
 				(int)txRate,
 				(int)pHddStaCtx->ibss_peer_info.
 				peerInfoParams[0].rssi);
+		length = QDF_MIN(priv_data->total_len, length + 1);
 
 		/* Copy the data back into buffer */
-		if (copy_to_user(priv_data->buf, &extra, length + 1)) {
+		if (copy_to_user(priv_data->buf, &extra, length)) {
 			hdd_err("copy data to user buffer failed GETIBSSPEERINFO command");
 			ret = -EFAULT;
 			goto exit;
@@ -7157,7 +7169,7 @@ static void disconnect_sta_and_stop_sap(hdd_context_t *hdd_ctx)
 	if (!hdd_ctx)
 		return;
 
-	wlan_hdd_disable_channels(hdd_ctx);
+	hdd_check_and_disconnect_sta_on_invalid_channel(hdd_ctx);
 
 	status = hdd_get_front_adapter(hdd_ctx, &adapter_node);
 	while (adapter_node && (status == QDF_STATUS_SUCCESS)) {
@@ -7344,11 +7356,16 @@ static int hdd_parse_disable_chan_cmd(hdd_adapter_t *adapter, uint8_t *ptr)
 		ret = 0;
 	}
 
-	if (!is_command_repeated && hdd_ctx->config->disable_channel)
-		disconnect_sta_and_stop_sap(hdd_ctx);
 mem_alloc_failed:
 
 	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
+	if (!is_command_repeated && hdd_ctx->original_channels) {
+		ret = wlan_hdd_disable_channels(hdd_ctx);
+		if (ret)
+			return ret;
+		disconnect_sta_and_stop_sap(hdd_ctx);
+	}
+
 	EXIT();
 
 	return ret;
