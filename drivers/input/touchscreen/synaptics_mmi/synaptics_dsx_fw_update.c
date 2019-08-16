@@ -1089,6 +1089,63 @@ static int fwu_parse_image_info(void)
 	return 0;
 }
 
+#ifdef CONFIG_CHEF_DTB
+static int fwu_read_flash_status(void)
+{
+	int retval;
+	unsigned char status;
+	struct f34_v7_data_1_5 data15;
+	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
+
+	retval = synaptics_rmi4_reg_read(rmi4_data,
+			fwu->f34_fd.data_base_addr + fwu->off.flash_status,
+			&status,
+			sizeof(status));
+	if (retval < 0) {
+		dev_err(LOGDEV,
+				"%s: Failed to read flash status\n",
+				__func__);
+		return retval;
+	}
+
+	retval = synaptics_rmi4_reg_read(rmi4_data,
+			fwu->f34_fd.data_base_addr + fwu->off.partition_id,
+			(unsigned char *)&data15,
+			sizeof(data15));
+	if (retval < 0) {
+		dev_err(LOGDEV,
+				"%s: Failed to read data15\n",
+				__func__);
+		return retval;
+	}
+
+	fwu->in_bl_mode = status >> 7;
+
+	if (fwu->bl_version == BL_V5)
+		fwu->flash_status = (status >> 4) & MASK_3BIT;
+	else if (fwu->bl_version == BL_V6)
+		fwu->flash_status = status & MASK_3BIT;
+	else
+		fwu->flash_status = status & MASK_5BIT;
+
+	if (fwu->flash_status != 0x00) {
+		dev_err(LOGDEV,
+			"%s: Flash status = %d, part_id = %d, command = 0x%02x\n",
+			__func__, fwu->flash_status,
+			data15.partition_id, data15.command);
+	}
+
+	if (fwu->bl_version >= BL_V7) {
+		if (fwu->flash_status == BAD_PARTITION_TABLE)
+			fwu->flash_status = 0x00;
+	}
+
+	fwu->command = data15.command;
+
+	return 0;
+}
+#else
+
 static int fwu_read_flash_status(void)
 {
 	int retval, partition = -1;
@@ -1165,6 +1222,7 @@ static int fwu_read_flash_status(void)
 
 	return 0;
 }
+#endif
 
 static int fwu_read_interrupt_status(void)
 {

@@ -1623,7 +1623,12 @@ static struct dentry *ext4_lookup(struct inode *dir, struct dentry *dentry,
 			ext4_warning(inode->i_sb,
 				     "Inconsistent encryption contexts: %lu/%lu %s\n",
 				     (unsigned long) dir->i_ino,
+#ifdef CONFIG_CHEF_DTB
+				     (unsigned long) inode->i_ino);
+#else
 				     (unsigned long) inode->i_ino, dentry->d_name.name);
+#endif
+
 			iput(inode);
 			WARN_ON("Inconsistent encryption contexts");
 			return ERR_PTR(-EPERM);

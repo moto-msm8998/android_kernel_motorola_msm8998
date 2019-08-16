@@ -616,6 +616,46 @@ out_unlock:
  * Return 1, if a disk has enough free space, otherwise 0.
  * We assume that any files can not be overwritten.
  */
+#ifdef CONFIG_CHEF_DTB
+static inline int check_min_free_space(struct dentry *dentry, size_t size, int dir)
+{
+	int err;
+	struct path lower_path;
+	struct kstatfs statfs;
+	u64 avail;
+	struct sdcardfs_sb_info *sbi = SDCARDFS_SB(dentry->d_sb);
+
+	/* Get fs stat of lower filesystem. */
+	sdcardfs_get_lower_path(dentry, &lower_path);
+	err = vfs_statfs(&lower_path, &statfs);
+	sdcardfs_put_lower_path(dentry, &lower_path);
+
+	if (unlikely(err))
+		return 0;
+
+	/* Invalid statfs informations. */
+	if (unlikely(statfs.f_bsize == 0))
+		return 0;
+
+	/* if you are checking directory, set size to f_bsize. */
+	if (unlikely(dir))
+		size = statfs.f_bsize;
+
+	/* available size */
+	avail = statfs.f_bavail * statfs.f_bsize;
+
+	/* not enough space */
+	if ((u64)size > avail)
+		return 0;
+
+	/* enough space */
+	if ((avail - size) > (sbi->options.reserved_mb * 1024 * 1024))
+		return 1;
+
+	return 0;
+}
+#else
+
 static inline int check_min_free_space(struct dentry *dentry, size_t size, int dir)
 {
 	int err;
@@ -656,6 +696,7 @@ static inline int check_min_free_space(struct dentry *dentry, size_t size, int d
 	} else
 		return 1;
 }
+#endif
 
 /*
  * Copies attrs and maintains sdcardfs managed attrs

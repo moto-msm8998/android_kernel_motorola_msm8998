@@ -2162,6 +2162,12 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 			mdss_fb_report_panel_dead(ctl->mfd);
 		} else if (ctx->pp_timeout_report_cnt == 0) {
 			MDSS_XLOG(0xbad);
+#ifdef CONFIG_CHEF_DTB
+			MDSS_XLOG_TOUT_HANDLER("mdp", "dsi0_ctrl", "dsi0_phy",
+				"dsi1_ctrl", "dsi1_phy", "vbif", "vbif_nrt",
+				"dbg_bus", "vbif_dbg_bus",
+				"dsi_dbg_bus", "panic");
+#endif
 			MDSS_XLOG_TOUT_HANDLER_MMI("mdp",
 				"dsi0_ctrl", "dsi0_phy",
 				"dsi1_ctrl", "dsi1_phy");

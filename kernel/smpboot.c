@@ -107,6 +107,9 @@ static int smpboot_thread_fn(void *data)
 {
 	struct smpboot_thread_data *td = data;
 	struct smp_hotplug_thread *ht = td->ht;
+#ifdef CONFIG_CHEF_DTB
+	unsigned long flags;
+#endif
 
 	while (1) {
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -158,9 +161,15 @@ static int smpboot_thread_fn(void *data)
 			 *     p->state = TASK_RUNNING;
 			 *                                   schedule();
 			 */
+#ifdef CONFIG_CHEF_DTB
+			raw_spin_lock_irqsave(&current->pi_lock, flags);
+			__set_current_state(TASK_RUNNING);
+			raw_spin_unlock_irqrestore(&current->pi_lock, flags);
+#else
 			raw_spin_lock(&current->pi_lock);
 			__set_current_state(TASK_RUNNING);
 			raw_spin_unlock(&current->pi_lock);
+#endif
 			preempt_enable();
 			if (ht->park && td->status == HP_THREAD_ACTIVE) {
 				BUG_ON(td->cpu != smp_processor_id());
