@@ -76,6 +76,7 @@ obj-$(CONFIG_AXP288_CHARGER)	+= axp288_charger.o
 obj-$(CONFIG_ARCH_QCOM)		+= qcom/
 obj-$(CONFIG_POWER_SUPPLY)	+= supply/
 obj-$(CONFIG_BQ2597X_MMI_CHARGER)	+= bq2597x_mmi/
+obj-$(CONFIG_MMI_PARALLEL_CHARGING)	+= mmi_pl_chg_manager/
 
 # TODO: remove me b/62057517
 subdir-ccflags-y += \
