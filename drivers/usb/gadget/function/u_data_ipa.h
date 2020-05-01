@@ -109,11 +109,33 @@ void ipa_data_start_rndis_ipa(enum ipa_func_type func);
 
 void ipa_data_stop_rndis_ipa(enum ipa_func_type func);
 
+#ifdef CONFIG_USB_F_QCRNDIS
 void *rndis_qc_get_ipa_priv(void);
 void *rndis_qc_get_ipa_rx_cb(void);
 bool rndis_qc_get_skip_ep_config(void);
 void *rndis_qc_get_ipa_tx_cb(void);
 void rndis_ipa_reset_trigger(void);
+#else
+static inline void *rndis_qc_get_ipa_priv(void)
+{
+	return NULL;
+}
+static inline void *rndis_qc_get_ipa_rx_cb(void)
+{
+	return NULL;
+}
+static inline bool rndis_qc_get_skip_ep_config(void)
+{
+	return true;
+}
+static inline void *rndis_qc_get_ipa_tx_cb(void)
+{
+	return NULL;
+}
+static inline void rndis_ipa_reset_trigger(void)
+{
+}
+#endif /* CONFIG_USB_F_QCRNDIS */
 void gqti_ctrl_update_ipa_pipes(void *gr, enum qti_port_type qport,
 				u32 ipa_prod, u32 ipa_cons);
 #endif
