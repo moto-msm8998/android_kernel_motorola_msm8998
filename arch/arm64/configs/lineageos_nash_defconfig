@@ -4734,7 +4734,7 @@ CONFIG_ARM_PMU=y
 #
 CONFIG_ANDROID=y
 CONFIG_ANDROID_BINDER_IPC=y
-CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"
+CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder,anbox-binder,binder1"
 # CONFIG_LIBNVDIMM is not set
 # CONFIG_NVMEM is not set
 # CONFIG_STM is not set
@@ -4902,7 +4902,8 @@ CONFIG_SDCARD_FS_DIR_WRITER=y
 # CONFIG_JFFS2_FS is not set
 # CONFIG_LOGFS is not set
 # CONFIG_CRAMFS is not set
-# CONFIG_SQUASHFS is not set
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
 # CONFIG_VXFS_FS is not set
 # CONFIG_MINIX_FS is not set
 # CONFIG_OMFS_FS is not set
